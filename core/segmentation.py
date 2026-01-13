@@ -13,6 +13,8 @@ os.environ["OPENCV_OPENCL_RUNTIME"] = "disabled"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+SEGMENTATION_VERSION = "1.1.2"
+
 class SegmentationEngine:
     def __init__(self, checkpoint_path=None, model_type="vit_b", device=None, model_instance=None):
         """
@@ -148,22 +150,17 @@ class SegmentationEngine:
                     
                     # 3. Hybrid Thresholding (ADAPTIVE BASED ON MODE)
                     if selected_level == 2: # "Whole Object" 
-                        # LEVEL 2 UPDATE: Tightened slightly from "Loose" to prevent ceiling leaks
+                        # LEVEL 2: Relaxed for better coverage of large surfaces
                         if is_grayscale_seed:
-                             valid_mask = (intensity_dist < 135).astype(np.uint8) # Tightened 160->135
+                             valid_mask = (intensity_dist < 155).astype(np.uint8) # Relaxed 135->155
                         else:
-                             valid_mask = ((chroma_dist < 60) & (intensity_dist < 190)).astype(np.uint8) # Tightened 210->190
+                             valid_mask = ((chroma_dist < 80) & (intensity_dist < 210)).astype(np.uint8) # Relaxed
                     else:
-                        # Level 0 (Fine) & Optimized
-                        # LOGIC UPDATE: Trust SAM more.
-                        # Relaxed thresholds to prevent "bleaching" (holes)
+                        # Level 0/1: Trust SAM but allow for texture/shadow
                         if is_grayscale_seed:
-                            valid_mask = (intensity_dist < 120).astype(np.uint8) # Relaxed 90->120
+                            valid_mask = (intensity_dist < 140).astype(np.uint8) # Relaxed 120->140
                         else:
-                            # Standard Color Mode
-                            # Chroma < 45 (Safe)
-                            # Intensity < 185 (Relaxed 150->185) to fill holes in textured walls
-                            valid_mask = ((chroma_dist < 45) & (intensity_dist < 185)).astype(np.uint8)
+                            valid_mask = ((chroma_dist < 65) & (intensity_dist < 200)).astype(np.uint8) # Relaxed
 
                     try:
                         # --- EDGE GUARD ---
@@ -189,7 +186,8 @@ class SegmentationEngine:
                         e_thresh = 85 if selected_level == 2 else 80
                         _, edge_barrier = cv2.threshold(edges_norm, e_thresh, 255, cv2.THRESH_BINARY_INV)
                         edge_barrier = (edge_barrier / 255).astype(np.uint8)
-                        edge_barrier = cv2.erode(edge_barrier, np.ones((3, 3), np.uint8), iterations=1)
+                        # Reduced erosion to avoid missing structural corners
+                        edge_barrier = cv2.erode(edge_barrier, np.ones((2, 2), np.uint8), iterations=1)
                         logger.info("Edge Guard completed successfully.")
                     except Exception as e:
                         logger.error(f"⚠️ Edge Guard Error (Bypassing to prevent crash): {e}")
@@ -200,8 +198,8 @@ class SegmentationEngine:
                     mask_refined = (mask_uint8 & valid_mask & edge_barrier)
                     
                     # --- HOLE FILLING (CRITICAL FOR UNIFORM LOOK) ---
-                    # Increased kernel (5->9) to fill the "bleaching" holes in large areas
-                    kernel_close = np.ones((9, 9), np.uint8)
+                    # Significantly increased kernel (9->21) to fill the "bleaching" holes in large, high-res areas
+                    kernel_close = np.ones((21, 21), np.uint8)
                     mask_refined = cv2.morphologyEx(mask_refined, cv2.MORPH_CLOSE, kernel_close)
                     
                     # Open to remove tiny flying pixels (leaks)
