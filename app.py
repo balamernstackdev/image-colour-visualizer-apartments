@@ -512,16 +512,30 @@ def render_sidebar(sam, device_str):
             st.session_state["picked_color"] = picked_color
             
             # --- SELECTION REFINEMENT MODE (Restored v1.4.3) ---
-            st.divider()
-            st.caption("Selection Tool")
-            refine_mode = st.radio(
-                "Action", 
-                ["➕ Add Area", "➖ Remove Area"], 
-                index=0, 
-                horizontal=True,
-                key="active_refine_mode"
-            )
-            st.session_state["click_label"] = 1 if "Add" in refine_mode else 0
+            with st.container():
+                st.caption("🛠️ Actions")
+                # Edit Mode: New vs Refine
+                # Renamed 'Refine Last Layer' to 'Multi-Select / Refine' to clarify creating complex selections.
+                edit_mode = st.radio(
+                    "Mode", 
+                    ["New Object", "Multi-Select / Refine"], 
+                    horizontal=True,
+                    help="**New Object:** Starts a fresh selection.\n\n**Multi-Select / Refine:** Add more parts to the current selection (e.g. select sofa + chair) or fix mistakes."
+                )
+                st.session_state["paint_mode"] = edit_mode # Sync with paint_mode for consistency
+                
+                if edit_mode == "Multi-Select / Refine":
+                    refine_type = st.radio(
+                        "Action", 
+                        ["➕ Add Area", "➖ Remove Area"], 
+                        index=0, 
+                        horizontal=True,
+                        key="active_refine_mode"
+                    )
+                    st.session_state["click_label"] = 1 if "Add" in refine_type else 0
+                else: # New Object mode
+                    st.session_state["click_label"] = 1 # Always add for new object
+            
             # CRITICAL: Instant Preview Update
             # Sync the color to the Active Selection object so the overlay renders it immediately.
             if st.session_state.get("active_selection"):
@@ -573,17 +587,8 @@ def render_sidebar(sam, device_str):
                 st.caption("Mode")
                 options = ["New Object", "Refine Last Layer"]
                 mode = st.radio("Mode", options, index=0, label_visibility="collapsed", key="paint_mode_selector")
-                st.session_state["paint_mode"] = mode
-                
-                if mode == "Refine Last Layer":
-                    refine_type = st.radio(
-                        "Action", 
-                        ["Add Area (Include)", "Subtract Area (Exclude)"], 
-                        index=1, 
-                        horizontal=True
-                    )
-                    st.session_state["refine_type"] = 1 if "Add" in refine_type else 0
-                    st.info(f"Click on the image to {refine_type.split(' ')[0]} that area.")
+                # Old Refine Block Removed.
+
             else:
                  st.session_state["paint_mode"] = "New Object"
 
@@ -599,10 +604,10 @@ def render_sidebar(sam, device_str):
         # 1. Mode Selection
         sens_mode = st.radio(
             "Segmentation Focus", 
-            ["🏠 Walls & Floors (Broad)", "🛋️ Furniture (Balanced)", "🎯 Small Details (Precision)"], 
+            ["🎯 Small Details (Precision)", "🏠 Walls & Floors (Broad)", "🛋️ Furniture (Balanced)"], 
             index=0,
             horizontal=False,
-            help="Choose what you are painting:\n\n🏠 **Walls & Floors:** Fills large areas. Ignores shadows.\n\n🛋️ **Furniture:** Best for sofas, tables, cabinets.\n\n🎯 **Small Details:** Trim, handles, switches."
+            help="Choose what you are painting:\n\n🎯 **Small Details:** Trim, handles, switches. Best start.\n\n🏠 **Walls & Floors:** Fills large areas. Ignores shadows.\n\n🛋️ **Furniture:** Best for sofas, tables, cabinets."
         )
         
         # Map Selection to AI Level

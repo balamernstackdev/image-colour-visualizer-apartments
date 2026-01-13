@@ -107,16 +107,14 @@ class SegmentationEngine:
                 kernel_size = 7       # Strong healing: Smooths jagged lines (was 5)
             elif level == 0: # Small Details (Strict Precision)
                 thresh_intensity = 45 # Strict: Stops at minor color changes
-                thresh_edge = 25      # Very Strict: Stops at all structural lines
-                erode_iters = 1       # Standard barrier
+                thresh_edge = 40      # Greedy: Prioritize coverage (was 35)
+                erode_iters = 0       # Max Coverage
                 kernel_size = 3       # Low healing to avoid bridging gaps
-            else: # Auto (Smart Balanced)
-                thresh_intensity = 55 
-                thresh_edge = 40      
-                erode_iters = 1       
-                kernel_size = 3       
-
-            # --- SMART COLOR SAFETY CHECK ---
+            else: # Auto (Smart Balanced) - Furniture
+                thresh_intensity = 60 # Relaxed: Allows fabric gradients
+                thresh_edge = 55      # Soft Object: Ignores deep wrinkles (was 50)
+                erode_iters = 0       
+                kernel_size = 7       # Strong healing: Bridges wrinkle gaps (was 5)           # --- SMART COLOR SAFETY CHECK ---
             # Re-enabled with Chromaticity Logic to fix Leaking AND Shadows.
             if hasattr(self, 'image_rgb'):
                 cx, cy = int(point_coords[0][0]), int(point_coords[0][1])
