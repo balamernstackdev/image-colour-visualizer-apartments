@@ -209,9 +209,9 @@ def setup_styles():
 
         /* Whitelabel - Hide Streamlit elements */
         #MainMenu {visibility: hidden;}
-        header {visibility: hidden;}
+        /* header {visibility: hidden;} <-- RESTORED for Native Sidebar Arrow */
         footer {visibility: hidden;}
-        [data-testid="stHeader"] {display: none;}
+        /* [data-testid="stHeader"] {display: none;} <-- Restored for Sidebar Access */
         </style>
     """, unsafe_allow_html=True)
 
