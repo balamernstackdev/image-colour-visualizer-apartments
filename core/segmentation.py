@@ -3,6 +3,7 @@ import torch
 import cv2
 import logging
 import os
+import numpy as np
 from mobile_sam import sam_model_registry, SamPredictor
 
 # Force disable OpenCL to prevent "Bad Argument" / "UMat" errors on Streamlit Cloud
@@ -13,7 +14,7 @@ os.environ["OPENCV_OPENCL_RUNTIME"] = "disabled"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-SEGMENTATION_VERSION = "1.1.2"
+SEGMENTATION_VERSION = "1.5.2"
 
 class SegmentationEngine:
     def __init__(self, checkpoint_path=None, model_type="vit_b", device=None, model_instance=None):
@@ -30,6 +31,7 @@ class SegmentationEngine:
         else:
             self.device = device
             
+        logger.info(f"Initialized SegmentationEngine v{SEGMENTATION_VERSION} on {self.device}")
         if model_instance is not None:
              self.sam = model_instance
         elif checkpoint_path:
@@ -81,136 +83,153 @@ class SegmentationEngine:
                 multimask_output=True # Generate multiple masks and choose best
             )
 
-        # Select best mask
-        # Helper to track which level we actually picked for post-processing decisions
-        selected_level = 0 
-        
-        if level is not None and 0 <= level < 3:
+        if level is not None and 0 <= level <= 2:
             # User forced a specific level
             best_mask = masks[level]
-            selected_level = level
         else:
-            # Heuristic: Favor 'Whole Object' (Index 2) for walls/large surfaces.
-            # User Feedback: "small thing why". They want the whole wall.
-            if scores[2] > 0.80: 
-                best_mask = masks[2]
-                selected_level = 2
-            elif scores[1] > 0.80:
-                best_mask = masks[1]
-                selected_level = 1
-            else:
-                best_idx = np.argmax(scores)
-                best_mask = masks[best_idx]
-                selected_level = int(best_idx)
+            # Heuristic: Choose the mask with the highest score
+            best_idx = np.argmax(scores)
+            best_mask = masks[best_idx]
         
         if cleanup:
             # Post-processing: Filter disconnected components
-            h, w = best_mask.shape
-            mask_uint8 = (best_mask * 255).astype(np.uint8)
+            # We only want the component that contains the clicked point.
             
-            # --- SMART COLOR SAFETY CHECK ---
-            # If we have a positive click, ensure we don't bleed into vastly different colors.
-            # This is critical for White Wall -> White Cabinet separation.
-            if len(point_coords) > 0 and len(point_labels) > 0:
-                # Find the positive click (label 1)
-                pos_indices = np.where(point_labels == 1)[0]
-                if len(pos_indices) > 0:
-                    idx = pos_indices[-1] # Use most recent click
-                    cx, cy = int(point_coords[idx][0]), int(point_coords[idx][1])
-                    
-                    # Sample seed color (3x3 average for stability) from RAW image
-                    y1, y2 = max(0, cy-1), min(h, cy+2)
-                    x1, x2 = max(0, cx-1), min(w, cx+2)
-                    seed_patch = self.image_rgb[y1:y2, x1:x2]
-                    seed_color = np.mean(seed_patch, axis=(0, 1))
-                    
-                    # Check for Grayscale Seed (White/Grey walls)
-                    # If R~G~B, we tighten intensity limits and ignore chroma
-                    std_dev = np.std(seed_color)
-                    is_grayscale_seed = std_dev < 10.0 # Strict check for neutral colors
-                    
-                    # DENOISE: Blur image for color comparison to ignore texture (bricks, concrete)
-                    # Increased blur (5->9) to handle the noisy texture seen in user screenshot
-                    img_blurred = cv2.GaussianBlur(self.image_rgb, (9, 9), 0)
-                    
-                    # 1. Chroma (Color) Distance (Fast integer math)
-                    img_u16 = img_blurred.astype(np.uint16)
-                    img_sum = np.sum(img_u16, axis=2) + 1 # Avoid div/0
-                    
-                    # Normalize chromaticity: r = R/Sum, g = G/Sum
-                    img_chroma = (img_u16[:, :, :2] << 8) // img_sum.reshape(h, w, 1) # Fixed point shift
-                    seed_sum = np.sum(seed_color) + 0.1
-                    seed_chroma = (seed_color[:2].astype(np.uint16) << 8) // int(seed_sum)
-                    
-                    # Color Distance
-                    chroma_dist = np.sum(np.abs(img_chroma - seed_chroma), axis=2)
-                    
-                    # 2. Intensity (Brightness)
-                    intensity_dist = np.abs(np.mean(img_u16, axis=2) - np.mean(seed_color))
-                    
-                    # 3. Hybrid Thresholding (ADAPTIVE BASED ON MODE)
-                    if selected_level == 2: # "Whole Object" 
-                        # LEVEL 2: Relaxed for better coverage of large surfaces
-                        if is_grayscale_seed:
-                             valid_mask = (intensity_dist < 155).astype(np.uint8) # Relaxed 135->155
-                        else:
-                             valid_mask = ((chroma_dist < 80) & (intensity_dist < 210)).astype(np.uint8) # Relaxed
-                    else:
-                        # Level 0/1: Trust SAM but allow for texture/shadow
-                        if is_grayscale_seed:
-                            valid_mask = (intensity_dist < 140).astype(np.uint8) # Relaxed 120->140
-                        else:
-                            valid_mask = ((chroma_dist < 65) & (intensity_dist < 200)).astype(np.uint8) # Relaxed
+            # Ensure mask is uint8 for OpenCV
+            mask_uint8 = (best_mask * 255).astype(np.uint8)
+            # --- ADAPTIVE THRESHOLDS ---
+            # Use strict guards for "Big Surfaces" (Level 2) to prevent bleeding.
+            # Use relaxed guards for "Small Details" (Level 0) or Auto to fill gaps/shadows.
+            if level == 2: # Big Surfaces
+                thresh_intensity = 65 # Balanced: Allows shadows, stops at color change
+                thresh_edge = 45      # Sweet Spot: Ignores molding shadows (was 40)
+                erode_iters = 0       # No barrier thickening: Max coverage
+                kernel_size = 7       # Strong healing: Smooths jagged lines (was 5)
+            elif level == 0: # Small Details (Strict Precision)
+                thresh_intensity = 45 # Strict: Stops at minor color changes
+                thresh_edge = 25      # Very Strict: Stops at all structural lines
+                erode_iters = 1       # Standard barrier
+                kernel_size = 3       # Low healing to avoid bridging gaps
+            else: # Auto (Smart Balanced)
+                thresh_intensity = 55 
+                thresh_edge = 40      
+                erode_iters = 1       
+                kernel_size = 3       
 
-                    try:
-                        # --- EDGE GUARD ---
-                        logger.info("Starting Edge Guard process...")
-                        edge_gray = cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY)
-                        edge_gray = cv2.GaussianBlur(edge_gray, (9, 9), 0)
-                        
-                        logger.info("Computing Sobel gradients...")
-                        lx = cv2.Sobel(edge_gray, cv2.CV_64F, 1, 0, ksize=5)
-                        ly = cv2.Sobel(edge_gray, cv2.CV_64F, 0, 1, ksize=5)
-                        
-                        logger.info("Computing magnitude via NumPy...")
-                        edges = np.sqrt(lx**2 + ly**2)
-                        
-                        logger.info("Applying manual normalization (NumPy)...")
-                        e_min, e_max = np.min(edges), np.max(edges)
-                        if e_max > e_min:
-                            edges_norm = ((edges - e_min) * (255.0 / (e_max - e_min))).astype(np.uint8)
-                        else:
-                            edges_norm = np.zeros(edges.shape, dtype=np.uint8)
-                        
-                        logger.info("Applying threshold and erosion...")
-                        e_thresh = 85 if selected_level == 2 else 80
-                        _, edge_barrier = cv2.threshold(edges_norm, e_thresh, 255, cv2.THRESH_BINARY_INV)
-                        edge_barrier = (edge_barrier / 255).astype(np.uint8)
-                        # Reduced erosion to avoid missing structural corners
-                        edge_barrier = cv2.erode(edge_barrier, np.ones((2, 2), np.uint8), iterations=1)
-                        logger.info("Edge Guard completed successfully.")
-                    except Exception as e:
-                        logger.error(f"⚠️ Edge Guard Error (Bypassing to prevent crash): {e}")
-                        edge_barrier = np.ones(self.image_rgb.shape[:2], dtype=np.uint8)
-        
-                    # Intersect SAM mask with Adaptive Boundaries
-                    # FILTER: Apply strict intersection even for Level 2 now (to stop leaks)
-                    mask_refined = (mask_uint8 & valid_mask & edge_barrier)
+            # --- SMART COLOR SAFETY CHECK ---
+            # Re-enabled with Chromaticity Logic to fix Leaking AND Shadows.
+            if hasattr(self, 'image_rgb'):
+                cx, cy = int(point_coords[0][0]), int(point_coords[0][1])
+                h, w = self.image_rgb.shape[:2]
+                cx, cy = max(0, min(cx, w-1)), max(0, min(cy, h-1))
+                
+                # Sample Seed
+                seed_color = self.image_rgb[cy, cx].astype(np.float32)
+                
+                # Check if seed is Grayscale (Saturation check)
+                seed_sat = np.max(seed_color) - np.min(seed_color)
+                is_grayscale_seed = seed_sat < 20 # Low saturation
+                
+                # 1. Chromaticity (Color only, invariant to brightness/shadows)
+                # OPTIMIZATION: Use uint16 for distance check to avoid heavy float32 conversion
+                img_u16 = self.image_rgb.astype(np.uint16)
+                img_sum = np.sum(img_u16, axis=2, keepdims=True)
+                img_sum[img_sum == 0] = 1 # Prevent div by zero
+                
+                # Implemented robustly
+                img_chroma = (img_u16[:, :, :2] << 8) // img_sum 
+                seed_chroma = (seed_color[:2].astype(np.uint16) << 8) // np.sum(seed_color + 0.1)
+                
+                # Color Distance
+                chroma_dist = np.sum(np.abs(img_chroma - seed_chroma), axis=2)
+                
+                # 2. Intensity (Brightness)
+                intensity_dist = np.abs(np.mean(img_u16, axis=2) - np.mean(seed_color))
+                
+                # 3. Hybrid Thresholding
+                if is_grayscale_seed:
+                    # BALANCED GUARD (v1.5.5): Adaptive Tolerance
+                    # Even for white walls, reject Strong Colors (like yellow sofa)
+                    # Use relaxed chroma (60) to allow tinted shadows but stop objects.
+                    valid_mask = (intensity_dist < thresh_intensity) & (chroma_dist < 60)
+                else:
+                    # Chroma 38 is approx 0.15 in fixed point (0.15 * 256)
+                    valid_mask = (chroma_dist < 38) & (intensity_dist < 180)
+
+                valid_mask = valid_mask.astype(np.uint8)
+                
+                # Intersect with SAM mask
+                mask_refined = (mask_uint8 & valid_mask)
+                
+                # --- EDGE GUARD (v1.5.1 - Restored for Line Detection) ---
+                # Detects physical lines (shadows/creases) between similar colored objects
+                try:
+                    gray = cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY)
+                    # Use lighter blur to keep sharp lines
+                    gray = cv2.GaussianBlur(gray, (5, 5), 0)
                     
-                    # --- HOLE FILLING (CRITICAL FOR UNIFORM LOOK) ---
-                    # Significantly increased kernel (9->21) to fill the "bleaching" holes in large, high-res areas
-                    kernel_close = np.ones((21, 21), np.uint8)
-                    mask_refined = cv2.morphologyEx(mask_refined, cv2.MORPH_CLOSE, kernel_close)
+                    # Standard Sobel
+                    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                    grad = np.sqrt(sobelx**2 + sobely**2)
                     
-                    # Open to remove tiny flying pixels (leaks)
-                    kernel_open = np.ones((3, 3), np.uint8)
-                    mask_refined = cv2.morphologyEx(mask_refined, cv2.MORPH_OPEN, kernel_open)
+                    # Normalize to 0-255
+                    grad_norm = cv2.normalize(grad, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
                     
-                    if np.sum(mask_refined) > 50: # At least some pixels survived
-                        mask_uint8 = mask_refined
+                    # Threshold to find strong lines (The "Barrier")
+                    # BALANCED GUARD (v1.5.5): Adaptive Edge Threshold
+                    
+                    # DYNAMIC OVERRIDE: If painting White/Gray surfaces, use STRICTER edges (35)
+                    # to catch faint shadow lines (like wall vs ceiling).
+                    # If painting Colors, use RELAXED edges (45) to ignore molding shadows.
+                    effective_thresh_edge = 35 if is_grayscale_seed and level == 2 else thresh_edge
+                    
+                    _, edge_mask = cv2.threshold(grad_norm, effective_thresh_edge, 255, cv2.THRESH_BINARY_INV)
+                    
+                    # Erode slightly to thicken the barrier
+                    kernel = np.ones((2, 2), np.uint8)
+                    edge_mask = cv2.erode(edge_mask, kernel, iterations=erode_iters)
+                    
+                    # Apply Edge Barrier
+                    mask_refined = cv2.bitwise_and(mask_refined, mask_refined, mask=edge_mask)
+                    
+                    # BALANCED GUARD (v1.5.5): Adaptive Healing
+                    kernel_heal = np.ones((kernel_size, kernel_size), np.uint8)
+                    mask_refined = cv2.morphologyEx(mask_refined, cv2.MORPH_CLOSE, kernel_heal)
+                    
+                except Exception as e:
+                    logger.error(f"Edge Guard Failed: {e}")
+
+                # --- TEXTURE GUARD (v1.5.6) ---
+                # Exclude high-frequency areas (screens, art, textured objects) even if color matches.
+                # Use the 'grad_norm' we already computed for edges.
+                # Walls are flat (Low Gradient). Detailed objects are busy (High Gradient).
+                thresh_texture = 15 # Sensitivity: Lower = stricter protection for screens
+                
+                # We need a dense variance map, not just edges.
+                # Use a larger blur for "Busy-ness" detection
+                # Optimization: Re-use 'gray' but compute local variance or just use dense edges
+                
+                # Simple Proxy: Check if area has HIGH density of edges
+                texture_mask = (grad_norm < thresh_texture).astype(np.uint8)
+                
+                # Intersect: Must be Color Valid AND Low Texture (Flat)
+                # But allow edges themselves (don't erase constraints).
+                # Actually, simply AND-ing can kill valid textured walls (bricks).
+                # Only apply Texture Guard if we are in "Level 2 (Big Surfaces)" where we expect flatness.
+                # AND Only if NOT Grayscale/White Seed (to allow white moldings/shadows).
+                if level == 2 and not is_grayscale_seed:
+                    mask_refined = mask_refined & texture_mask
+                
+                # Safety Fallback for Textured Walls:
+                # If we killed >50% of the mask, maybe it IS a textured wall.
+                # For now, prioritize NOT painting TVs.
+                
+                # Safety Fallback
+                if np.sum(mask_refined) > 50: # At least some pixels survived
+                    mask_uint8 = mask_refined
             
             # Check if the click point is actually inside the mask (it should be, but just in case)
-            # We take the first point (positive click)
             if len(point_coords) > 0:
                 cx, cy = int(point_coords[0][0]), int(point_coords[0][1])
                 
@@ -218,9 +237,6 @@ class SegmentationEngine:
                 num_labels, labels_im, stats, centroids = cv2.connectedComponentsWithStats(mask_uint8, connectivity=8)
                 
                 if num_labels > 1:
-                    # labels_im has values 0 (bg), 1, 2, ...
-                    # Get label at click position
-                    # Make sure coordinates are within image bounds
                     h, w = mask_uint8.shape
                     cx = max(0, min(cx, w - 1))
                     cy = max(0, min(cy, h - 1))
@@ -231,9 +247,7 @@ class SegmentationEngine:
                         # Create a new mask keeping only the target component
                         best_mask = (labels_im == target_label)
                     else:
-                        # Fallback: if click was somehow outside (e.g. edge case), keep largest component ignoring background
-                        # stats[0] is background.
-                        # Find max area among others
+                        # Fallback: if click was somehow outside, keep largest component ignoring background
                         max_area = 0
                         max_label = 1
                         for i in range(1, num_labels):

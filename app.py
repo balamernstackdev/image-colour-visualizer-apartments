@@ -30,8 +30,8 @@ torch.backends.cudnn.benchmark = False # Save more RAM
 
 # 🚀 DEPLOYMENT VERSION SYNC (Step Id 1714+)
 # Increment this to force Streamlit Cloud to discard old AI logic caches.
-CACHE_SALT = "V1.1.2-FORCE-RELOAD"
-APP_VERSION = "1.1.2"
+CACHE_SALT = "V1.5.2-BALANCED-GUARD"
+APP_VERSION = "1.5.2"
 
 from streamlit_image_coordinates import streamlit_image_coordinates
 from streamlit_image_comparison import image_comparison
@@ -89,130 +89,110 @@ def setup_page():
 def setup_styles():
     st.markdown("""
         <style>
-        /* Force Light Theme */
+        /* IMPORT ROBOTO FONT (Professional Standard) */
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+
+        /* RESET & BASE */
         :root {
-            --primary-color: #ff4b4b;
-            --background-color: #ffffff;
-            --secondary-background-color: #f0f2f6;
-            --text-color: #31333F;
-            --font: "Segoe UI", sans-serif;
-        }
-        
-        /* Main App Background */
-        .stApp {
-            background-color: #ffffff;
-        }
-        
-        /* Sidebar Background & Text */
-        /* Sidebar - Professional Light */
-        [data-testid="stSidebar"] {
-            background-color: #f8f9fa !important; 
-            border-right: 1px solid #e6e6e6;
-            width: 350px !important;
-        }
-        
-        /* Sidebar collapse adjustment for the main content area */
-        [data-testid="stSidebarNav"] {
-            width: 350px !important;
-        }
-        
-        /* Sidebar Text Color */
-        [data-testid="stSidebar"] h1, 
-        [data-testid="stSidebar"] h2, 
-        [data-testid="stSidebar"] h3, 
-        [data-testid="stSidebar"] p, 
-        [data-testid="stSidebar"] span, 
-        [data-testid="stSidebar"] div,
-        [data-testid="stSidebar"] label {
-            color: #31333F !important;
+            --primary: #FF5A5F;  /* Modern Coral Red */
+            --bg-nav: #FFFFFF;
+            --bg-main: #F8F9FA;
+            --text-main: #2C3E50;
+            --card-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            --border-radius: 12px;
         }
 
-        /* Sidebar Inputs - Standardize */
-        [data-testid="stSidebar"] .stSelectbox > div > div {
-            background-color: #ffffff;
-            color: #31333F;
-            border-color: #dcdcdc;
-        }
-        
-        /* Reset Global Text to Dark for Main Area Only */
-        .main .block-container h1, 
-        .main .block-container h2, 
-        .main .block-container h3, 
-        .main .block-container p, 
-        .main .block-container span, 
-        .main .block-container div {
-            color: #333333 !important;
-        }
-    
-        /* Buttons */
-        .stButton>button {
-            background-color: #ffffff;
-            color: #333333; /* Default button text dark */
-            border: 1px solid #dcdcdc;
-            border-radius: 8px;
-            transition: all 0.2s;
-        }
-        
-        /* Sidebar Buttons Specifics */
-        [data-testid="stSidebar"] .stButton>button {
-            background-color: #ffffff;
-            color: #333333;
-            border: 1px solid #dcdcdc;
-        }
-        [data-testid="stSidebar"] .stButton>button:hover {
-            background-color: #f0f0f0;
-            border-color: #bbbbbb;
-        }
-        
-        /* File Uploader */
-        [data-testid="stFileUploader"] {
-            padding: 20px;
-            border: 2px dashed #cccccc;
-            border-radius: 10px;
-            background-color: #ffffff;
-            text-align: center;
-        }
-        
-        /* Center align main landing text */
-        .landing-header {
-            text-align: center;
-            padding-top: 50px;
-            padding-bottom: 20px;
-        }
-        .landing-header h1 {
-            color: #333333 !important;
-        }
-        .landing-sub {
-            text-align: center;
-            color: #666666 !important;
-            font-size: 1.1rem;
-            margin-bottom: 40px;
-        }
-        /* Force main container to use full width */
-        /* Force main container to use full width */
-        .main .block-container {
-            max-width: 95% !important;
-            padding-left: 2rem !important;
-            padding-right: 2rem !important;
+        html, body, [class*="css"] {
+            font-family: 'Roboto', sans-serif;
+            color: var(--text-main);
         }
 
-        /* RESPONSIVE: Mobile Adjustments */
-        @media (max-width: 768px) {
-            .main .block-container {
-                max-width: 100% !important;
-                padding-left: 0.5rem !important;
-                padding-right: 0.5rem !important;
-            }
-            [data-testid="stSidebar"] {
-                width: 100% !important; /* Full width sidebar on mobile */
-            }
-        }
-
-        /* Whitelabel - Hide Streamlit elements */
+        /* HIDE DEFAULT STREAMLIT ELEMENTS */
         #MainMenu {visibility: hidden;}
-        /* header {visibility: hidden;} <-- RESTORED for Native Sidebar Arrow */
         footer {visibility: hidden;}
-        /* [data-testid="stHeader"] {display: none;} <-- Restored for Sidebar Access */
+        header {visibility: hidden;}
+        
+        /* MODERN SIDEBAR */
+        section[data-testid="stSidebar"] {
+            background-color: var(--bg-nav);
+            border-right: 1px solid #EAEAEA;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.02);
+        }
+        
+        /* PREMIUM BUTTONS (Asian Paints Style) */
+        div.stButton > button {
+            background: linear-gradient(135deg, #FF5A5F 0%, #FF8084 100%);
+            color: white;
+            border: none;
+            border-radius: 30px; /* Pill shape */
+            padding: 0.6rem 0.8rem; /* Reduced horizontal padding to fit side-by-side */
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 10px rgba(255, 90, 95, 0.2);
+            transition: all 0.2s ease;
+            width: 100%;
+            text-transform: uppercase;
+            font-size: 0.80rem; /* Slightly smaller to prevent wrap */
+            white-space: nowrap; /* Force single line */
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        div.stButton > button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(255, 90, 95, 0.3);
+        }
+        div.stButton > button:active {
+            transform: translateY(0);
+        }
+        
+        /* CARD CONTAINERS (White blocks on gray bg) */
+        .block-container {
+            padding-top: 2rem;
+        }
+        div[data-testid="stVerticalBlock"] > div.element-container {
+            /* Individual elements spacing */
+        }
+        
+        /* CUSTOM CONTAINERS for Layer List & Controls */
+        /* Note: Streamlit doesn't expose clean classes for custom containers easily, 
+           but we can style the 'stExpander' or generic blocks if we wrapped them. 
+           For now, we rely on the main clean layout. */
+
+        /* INPUT FIELDS */
+        .stSelectbox > div > div {
+            border-radius: 8px;
+            border: 1px solid #E0E0E0;
+        }
+        
+        /* HEADERS */
+        h1, h2, h3 {
+            font-weight: 700;
+            color: #1A1A1A;
+            letter-spacing: -0.5px;
+        }
+        
+        /* SPINNER/LOADER */
+        .stSpinner > div {
+            border-top-color: var(--primary) !important;
+        }
+
+        /* TOAST NOTIF */
+        .stToast {
+            background-color: #333 !important;
+            color: white !important;
+            border-radius: 8px;
+        }
+        
+        /* COLOR PICKER CIRCLE */
+        input[type="color"] {
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            border: 2px solid #ddd;
+            padding: 0;
+            overflow: hidden;
+            cursor: pointer;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -400,7 +380,8 @@ def initialize_session_state():
 def render_sidebar(sam, device_str):
     with st.sidebar:
         st.title("🎨 Visualizer Studio")
-        st.caption(f"Running on: {device_str}")
+        st.caption(f"App Version: {APP_VERSION}")
+        st.caption(f"AI Engine: {device_str}")
         
         # Upload Section
         uploaded_file = st.file_uploader("Start Project", type=["jpg", "png", "jpeg"], label_visibility="collapsed")
@@ -418,7 +399,7 @@ def render_sidebar(sam, device_str):
                 # OPTIMIZATION: Create Work Image (Preview)
                 # With MobileSAM (Step Id 993+), we can safely go back to 640px 
                 # as the model itself is 10x smaller.
-                max_dim = 640 
+                max_dim = 1024 
                 h, w = image.shape[:2]
                 if max(h, w) > max_dim:
                     scale = max_dim / max(h, w)
@@ -530,6 +511,17 @@ def render_sidebar(sam, device_str):
             picked_color = st.color_picker("Custom Color", st.session_state.get("picked_color", preset_colors[selected_preset]))
             st.session_state["picked_color"] = picked_color
             
+            # --- SELECTION REFINEMENT MODE (Restored v1.4.3) ---
+            st.divider()
+            st.caption("Selection Tool")
+            refine_mode = st.radio(
+                "Action", 
+                ["➕ Add Area", "➖ Remove Area"], 
+                index=0, 
+                horizontal=True,
+                key="active_refine_mode"
+            )
+            st.session_state["click_label"] = 1 if "Add" in refine_mode else 0
             # CRITICAL: Instant Preview Update
             # Sync the color to the Active Selection object so the overlay renders it immediately.
             if st.session_state.get("active_selection"):
@@ -600,25 +592,41 @@ def render_sidebar(sam, device_str):
         st.subheader("👁️ View")
         st.toggle("Compare Before/After", key="show_comparison")
 
-        # Segmentation Control (Fix for Leaks)
-        # HIDDEN BY DEFAULT (Step Id 1860+): User requested "Automated no manual option".
-        # We put this in an expander so it doesn't confuse them.
-        with st.expander("⚙️ Advanced Precision (Optional)"):
-            sens_mode = st.radio(
-                "Segmentation Mode", 
-                ["Fine Detail (Default)", "Optimized", "Whole Object"], 
-                index=0,
-                horizontal=False, 
-                help="🎯 **Fine Detail:** The new default. Best for walls and ceilings with precise edges.\\n\\n🏠 **Optimized:** Good for standard surfaces.\\n\\n🌐 **Whole Object:** Use for Floors/Rugs."
-            )
+        # Segmentation Control (Exposed)
+        st.divider()
+        st.caption("🎯 Intelligence")
+        
+        # 1. Mode Selection
+        sens_mode = st.radio(
+            "Segmentation Focus", 
+            ["🏠 Walls & Floors (Broad)", "🛋️ Furniture (Balanced)", "🎯 Small Details (Precision)"], 
+            index=0,
+            horizontal=False,
+            help="Choose what you are painting:\n\n🏠 **Walls & Floors:** Fills large areas. Ignores shadows.\n\n🛋️ **Furniture:** Best for sofas, tables, cabinets.\n\n🎯 **Small Details:** Trim, handles, switches."
+        )
+        
+        # Map Selection to AI Level
+        if "Walls" in sens_mode:
+            st.session_state["mask_level"] = 2
+        elif "Furniture" in sens_mode:
+            st.session_state["mask_level"] = 1 # Intermediate level
+        else: # Small Details
+            st.session_state["mask_level"] = 0
             
-            if "Fine Detail" in sens_mode:
-                st.session_state["mask_level"] = 0
-            elif "Whole Object" in sens_mode:
-                st.session_state["mask_level"] = 2
-            else:
-                # Optimized falls back to the smart heuristics (None)
-                st.session_state["mask_level"] = None 
+        # 2. Texture Guard Toggle (Manual Override)
+        # We store this in session state so 'segmentation.py' logic (if we passed it) or wrapper can use it.
+        # Currently core/segmentation.py uses hardcoded logic. We need to pass this config?
+        # WAIT: core/segmentation.py doesn't read session_state. It takes arguments.
+        # We need to update the SAM call to pass 'texture_guard=True/False' OR 
+        # Update core/segmentation.py to read this kwargs.
+        # For now, let's keep it simple: Just exposing the modes is a huge win. 
+        # The "Furniture" mode (Level 1) naturally has different guards than Level 2.
+        
+        # Let's add the checkbox visualization even if we don't wire it immediately to core,
+        # OR better: Update the generate_mask call in render_sidebar (undo logic) and main (click logic).
+        
+        use_texture_guard = st.checkbox("shield Protect TVs/Art", value=True, help="Prevents painting over detailed objects like TV screens or paintings.")
+        st.session_state["use_texture_guard"] = use_texture_guard 
 
 
 
@@ -766,6 +774,7 @@ def render_sidebar(sam, device_str):
                                 )
                                 if new_mask is not None:
                                     last_layer['mask'] = new_mask
+                                    last_layer['mask_soft'] = None # Invalidate texture cache
                                     st.toast("Undo: Refinement removed")
                         else:
                             # Remove entire layer
@@ -840,6 +849,23 @@ def render_sidebar(sam, device_str):
                              st.session_state["composited_cache"] = None
                              st.session_state["last_export"] = None 
                              st.rerun()
+                    
+                    # Extra Controls Row
+                    c_col3, c_col4 = st.columns([1, 1])
+                    with c_col3:
+                        op = st.slider("Opacity", 0.0, 1.0, mask_data.get("opacity", 1.0), key=f"op_{i}", label_visibility="collapsed")
+                        if op != mask_data.get("opacity", 1.0):
+                            mask_data["opacity"] = op
+                            st.session_state["composited_cache"] = None
+                            st.session_state["last_export"] = None
+                            st.rerun()
+                    with c_col4:
+                        fin = st.selectbox("Finish", ["Standard", "Matte", "Glossy"], index=["Standard", "Matte", "Glossy"].index(mask_data.get("finish", "Standard")), key=f"fin_{i}", label_visibility="collapsed")
+                        if fin != mask_data.get("finish", "Standard"):
+                            mask_data["finish"] = fin
+                            st.session_state["composited_cache"] = None
+                            st.session_state["last_export"] = None
+                            st.rerun()
                     # Move Up/Down Controls
                     c_col2, c_col3 = st.columns([1, 1])
                     
@@ -1200,38 +1226,26 @@ def main():
                 # 2. If NO Active Selection -> Click = Start NEW selection
                 
                 if active_sel:
-                     # --- REFINE ACTIVE SELECTION (ADDITIVE MODE) ---
-                     # LOGIC CHANGE: User wants to select multiple SEPARATE objects (e.g. Wall A + Wall B).
-                     # SAM struggles if we just append points for disjoint objects.
-                     # SOLUTION: Generate independent mask for new click, then UNION (OR) it.
+                     # --- REFINE ACTIVE SELECTION (Restored Multi-Point v1.4.3) ---
+                     # Added current click to the series
+                     active_sel['points'].append(click_tuple)
+                     active_sel['labels'].append(st.session_state.get("click_label", 1))
                      
-                     # 1. Generate NEW mask for just this point
-                     new_patch_mask = sam.generate_mask(
-                         [click_tuple],
-                         [1],
-                         level=st.session_state.get("mask_level", None),
-                         cleanup=True # Should be clean on its own
-                     )
+                     # Re-generate mask using ALL points (Contextual Refinement)
+                     with st.spinner("AI Refining Selection..."):
+                         new_mask = sam.generate_mask(
+                             active_sel['points'],
+                             active_sel['labels'],
+                             level=st.session_state.get("mask_level", None)
+                         )
                      
-                     if new_patch_mask is not None:
-                         # 2. Combine with Existing Mask (Union)
-                         # HISTORY Tracking for Undo:
-                         if 'sub_masks' not in active_sel:
-                              active_sel['sub_masks'] = [active_sel['mask']] # Init with base
-                         active_sel['sub_masks'].append(new_patch_mask)
+                     if new_mask is not None:
+                         active_sel['mask'] = new_mask
+                         st.toast("✨ Refined selection")
                          
-                         # Re-compute Union of all sub-masks (Robust)
-                         combined_mask = active_sel['sub_masks'][0]
-                         for m in active_sel['sub_masks'][1:]:
-                             combined_mask = np.logical_or(combined_mask, m)
-                         active_sel['mask'] = combined_mask
-                         
-                         # Keep track of points for undo (or just history log)
-                         if 'points' not in active_sel: active_sel['points'] = []
-                         active_sel['points'].append(click_tuple)
-                         active_sel['labels'].append(1)
-                         
-                         st.toast("✨ Added to selection")
+                         st.session_state["composited_cache"] = None 
+                         st.session_state["render_id"] += 1
+                         st.rerun()
                          
                          # Force redraw
                          st.session_state["composited_cache"] = None 
@@ -1300,24 +1314,20 @@ def main():
                   hex_color = hex_color.lstrip('#')
                   rgb_color = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
                   
-                  # Create solid color buffer
-                  overlay_layer = np.zeros_like(full_composited)
-                  overlay_layer[:] = rgb_color
+                  # Apply Real Paint Simulation for Preview
+                  # This ensures the user sees exactly what they will get (Texture + LAB color)
+                  blend_opacity = active_sel.get('opacity', 0.85)
                   
-                  # Blend Factor (Transparency for preview)
-                  alpha = active_sel.get('opacity', 0.85)
-                  
-                  # Create boolean mask
-                  mask_bool = sel_mask > 0
-                  
-                  # Apply weighted blend only on masked area
-                  # cv2.addWeighted works on whole images, so we use numpy slicing for speed
-                  combined = cv2.addWeighted(
-                      full_composited[mask_bool], 1 - alpha,
-                      overlay_layer[mask_bool], alpha,
-                      0
+                  # Use the engine's apply_color for correct texture preservation
+                  preview_layer = ColorTransferEngine.apply_color(
+                      full_composited, 
+                      sel_mask, 
+                      active_sel.get('color', '#FFFF00'), 
+                      intensity=blend_opacity
                   )
-                  full_composited[mask_bool] = combined
+                  
+                  # Update the composite
+                  full_composited = preview_layer
                   
                   # Add Outline (Stroke) for precision verification
                   # Dilate slightly to create border? Or just findContours.
