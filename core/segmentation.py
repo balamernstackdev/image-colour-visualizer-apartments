@@ -169,7 +169,11 @@ class SegmentationEngine:
                     edges = cv2.magnitude(lx, ly)
                     
                     # Normalize edges
-                    edges = cv2.normalize(edges, None, 0, 255, cv2.NORM_MINMAX)
+                    e_min, e_max = np.min(edges), np.max(edges)
+                    if e_max > e_min:
+                        edges = (edges - e_min) * (255.0 / (e_max - e_min))
+                    else:
+                        edges = np.zeros_like(edges)
                     edges = edges.astype(np.uint8)
                     
                     # Threshold strong edges
