@@ -101,7 +101,7 @@ class SegmentationEngine:
                     idx = pos_indices[-1] # Use most recent click
                     cx, cy = int(point_coords[idx][0]), int(point_coords[idx][1])
                     
-                    # Sample seed color (3x3 average for stability)
+                    # Sample seed color (3x3 average for stability) from RAW image
                     y1, y2 = max(0, cy-1), min(h, cy+2)
                     x1, x2 = max(0, cx-1), min(w, cx+2)
                     seed_patch = self.image_rgb[y1:y2, x1:x2]
@@ -112,8 +112,12 @@ class SegmentationEngine:
                     std_dev = np.std(seed_color)
                     is_grayscale_seed = std_dev < 10.0 # Strict check for neutral colors
                     
+                    # DENOISE: Blur image for color comparison to ignore texture (bricks, concrete)
+                    # This prevents "salt and pepper" holes in the mask
+                    img_blurred = cv2.GaussianBlur(self.image_rgb, (11, 11), 0)
+                    
                     # 1. Chroma (Color) Distance (Fast integer math)
-                    img_u16 = self.image_rgb.astype(np.uint16)
+                    img_u16 = img_blurred.astype(np.uint16)
                     img_sum = np.sum(img_u16, axis=2) + 1 # Avoid div/0
                     
                     # Normalize chromaticity: r = R/Sum, g = G/Sum

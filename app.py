@@ -56,8 +56,24 @@ except Exception as e:
     st.stop()
 
 # 🎯 GLOBAL AI CONFIGURATION
+# 🎯 GLOBAL AI CONFIGURATION
 MODEL_TYPE = "vit_t"
 CHECKPOINT_PATH = "weights/mobile_sam.pt"
+
+def ensure_weights():
+    if not os.path.exists(CHECKPOINT_PATH):
+        with st.spinner("Downloading AI Model (MobileSAM)... this performs a one-time setup."):
+            if not os.path.exists("weights"):
+                os.makedirs("weights")
+            url = "https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt"
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            with open(CHECKPOINT_PATH, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            st.success("AI Model Downloaded!")
+
+ensure_weights()
 from core.colorizer import ColorTransferEngine
 
 # --- CONFIGURATION & STYLES ---
