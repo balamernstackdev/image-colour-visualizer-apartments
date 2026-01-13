@@ -529,6 +529,14 @@ def render_sidebar(sam, device_str):
             picked_color = st.color_picker("Custom Color", st.session_state.get("picked_color", preset_colors[selected_preset]))
             st.session_state["picked_color"] = picked_color
             
+            # CRITICAL: Instant Preview Update
+            # Sync the color to the Active Selection object so the overlay renders it immediately.
+            if st.session_state.get("active_selection"):
+                 # Check for change to force render update
+                 if st.session_state["active_selection"].get("color") != picked_color:
+                     st.session_state["active_selection"]["color"] = picked_color
+                     st.session_state["render_id"] += 1
+            
             # Apply / Discard Actions
             col_apply, col_discard = st.columns(2)
             with col_apply:
@@ -704,10 +712,28 @@ def render_sidebar(sam, device_str):
                     # PRIORITY 1: Undo Active Selection
                     if has_active:
                         act_sel = st.session_state["active_selection"]
-                        if len(act_sel['points']) > 1:
+                    # PRIORITY 1: Undo Active Selection
+                    if has_active:
+                        act_sel = st.session_state["active_selection"]
+                        
+                        # NEW: Sub-Mask History Undo (Robust)
+                        if 'sub_masks' in act_sel and len(act_sel['sub_masks']) > 1:
+                            act_sel['sub_masks'].pop()
+                            act_sel['points'].pop() # Keep consistent
+                            act_sel['labels'].pop()
+                            
+                            # Re-union remaining
+                            combined_mask = act_sel['sub_masks'][0]
+                            for m in act_sel['sub_masks'][1:]:
+                                combined_mask = np.logical_or(combined_mask, m)
+                            act_sel['mask'] = combined_mask
+                            st.toast("Undo: Removed last object")
+                            
+                        # OLD/Fallback: Single Point or Legacy
+                        elif len(act_sel.get('points', [])) > 1:
+                            # This path is rare now with sub_masks, but safe fallback
                             act_sel['points'].pop()
                             act_sel['labels'].pop()
-                            # Re-generate
                             with torch.inference_mode():
                                 new_mask = sam.generate_mask(
                                     act_sel['points'],
@@ -1173,39 +1199,41 @@ def main():
                 # 2. If NO Active Selection -> Click = Start NEW selection
                 
                 if active_sel:
-                     # --- REFINE ACTIVE SELECTION ---
-                     if 'points' not in active_sel:
-                         active_sel['points'] = [active_sel['point']]
-                         active_sel['labels'] = [1]
+                     # --- REFINE ACTIVE SELECTION (ADDITIVE MODE) ---
+                     # LOGIC CHANGE: User wants to select multiple SEPARATE objects (e.g. Wall A + Wall B).
+                     # SAM struggles if we just append points for disjoint objects.
+                     # SOLUTION: Generate independent mask for new click, then UNION (OR) it.
                      
-                     # Determine Label (Left click vs Right click? Or UI toggle?)
-                     # For now, we assume ADD (1) unless specified.
-                     # We can check specific keys or just default to Add.
-                     # Future: Add a small floating toolbar for Active Selection Mode (Add/Sub)?
-                     # For now, simplistic: Always Add.
-                     new_label = 1 
-                     
-                     active_sel['points'].append(click_tuple)
-                     active_sel['labels'].append(new_label)
-                     
-                     # RESILIENCE: Re-sync
-                     if not sam.is_image_set:
-                         with st.spinner("🔄 AI Re-syncing image..."):
-                             sam.set_image(st.session_state["image"])
-                             st.session_state["engine_img_id"] = id(st.session_state["image"])
-                             
-                     refined_mask = sam.generate_mask(
-                         active_sel['points'],
-                         active_sel['labels'],
+                     # 1. Generate NEW mask for just this point
+                     new_patch_mask = sam.generate_mask(
+                         [click_tuple],
+                         [1],
                          level=st.session_state.get("mask_level", None),
-                         cleanup=False
+                         cleanup=True # Should be clean on its own
                      )
                      
-                     if refined_mask is not None:
-                         active_sel['mask'] = refined_mask
-                         st.toast("✨ Selection Updated")
+                     if new_patch_mask is not None:
+                         # 2. Combine with Existing Mask (Union)
+                         # HISTORY Tracking for Undo:
+                         if 'sub_masks' not in active_sel:
+                              active_sel['sub_masks'] = [active_sel['mask']] # Init with base
+                         active_sel['sub_masks'].append(new_patch_mask)
+                         
+                         # Re-compute Union of all sub-masks (Robust)
+                         combined_mask = active_sel['sub_masks'][0]
+                         for m in active_sel['sub_masks'][1:]:
+                             combined_mask = np.logical_or(combined_mask, m)
+                         active_sel['mask'] = combined_mask
+                         
+                         # Keep track of points for undo (or just history log)
+                         if 'points' not in active_sel: active_sel['points'] = []
+                         active_sel['points'].append(click_tuple)
+                         active_sel['labels'].append(1)
+                         
+                         st.toast("✨ Added to selection")
+                         
                          # Force redraw
-                         st.session_state["composited_cache"] = None # Might seem redundant but good for safety
+                         st.session_state["composited_cache"] = None 
                          st.session_state["render_id"] += 1
                          st.rerun()
 
@@ -1231,6 +1259,7 @@ def main():
                         selection_obj = {
                             'mask': mask,
                             'mask_soft': None, 
+                            'sub_masks': [mask], # NEW: History for undo
                             'color': preview_color, # Placeholder
                             'point': click_tuple,
                             'points': [click_tuple],
@@ -1275,7 +1304,7 @@ def main():
                   overlay_layer[:] = rgb_color
                   
                   # Blend Factor (Transparency for preview)
-                  alpha = 0.5
+                  alpha = active_sel.get('opacity', 0.85)
                   
                   # Create boolean mask
                   mask_bool = sel_mask > 0

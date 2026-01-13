@@ -75,16 +75,26 @@ class SegmentationEngine:
             )
 
         # Select best mask
+        # Helper to track which level we actually picked for post-processing decisions
+        selected_level = 0 
+        
         if level is not None and 0 <= level < 3:
             # User forced a specific level
             best_mask = masks[level]
+            selected_level = level
         else:
-            # Heuristic: Favor 'Sub-segment' (Index 1) for architectural surfaces.
-            if scores[1] > 0.70: 
+            # Heuristic: Favor 'Whole Object' (Index 2) for walls/large surfaces.
+            # User Feedback: "small thing why". They want the whole wall.
+            if scores[2] > 0.80: 
+                best_mask = masks[2]
+                selected_level = 2
+            elif scores[1] > 0.80:
                 best_mask = masks[1]
+                selected_level = 1
             else:
                 best_idx = np.argmax(scores)
                 best_mask = masks[best_idx]
+                selected_level = int(best_idx)
         
         if cleanup:
             # Post-processing: Filter disconnected components
@@ -113,8 +123,8 @@ class SegmentationEngine:
                     is_grayscale_seed = std_dev < 10.0 # Strict check for neutral colors
                     
                     # DENOISE: Blur image for color comparison to ignore texture (bricks, concrete)
-                    # This prevents "salt and pepper" holes in the mask
-                    img_blurred = cv2.GaussianBlur(self.image_rgb, (11, 11), 0)
+                    # Increased blur (5->9) to handle the noisy texture seen in user screenshot
+                    img_blurred = cv2.GaussianBlur(self.image_rgb, (9, 9), 0)
                     
                     # 1. Chroma (Color) Distance (Fast integer math)
                     img_u16 = img_blurred.astype(np.uint16)
@@ -132,55 +142,51 @@ class SegmentationEngine:
                     intensity_dist = np.abs(np.mean(img_u16, axis=2) - np.mean(seed_color))
                     
                     # 3. Hybrid Thresholding (ADAPTIVE BASED ON MODE)
-                    if level == 2: # "Whole Object" 
-                        valid_mask = np.ones((h, w), dtype=np.uint8)
+                    if selected_level == 2: # "Whole Object" 
+                        # LEVEL 2 UPDATE: Tightened slightly from "Loose" to prevent ceiling leaks
+                        if is_grayscale_seed:
+                             valid_mask = (intensity_dist < 135).astype(np.uint8) # Tightened 160->135
+                        else:
+                             valid_mask = ((chroma_dist < 60) & (intensity_dist < 190)).astype(np.uint8) # Tightened 210->190
                     else:
                         # Level 0 (Fine) & Optimized
                         # LOGIC UPDATE: Trust SAM more.
-                        # - If colored: Ignore intensity (allows shadows). Checking Chroma only.
-                        # - If grayscale: Must check intensity to prevent bleeding to other grey things.
+                        # Relaxed thresholds to prevent "bleaching" (holes)
                         if is_grayscale_seed:
-                            valid_mask = (intensity_dist < 100).astype(np.uint8) # Strict intensity for white walls
+                            valid_mask = (intensity_dist < 120).astype(np.uint8) # Relaxed 90->120
                         else:
                             # Standard Color Mode
-                            # Chroma < 50 is usually safe for distinct colors.
-                            # Re-added loose intensity check (180) to stop "infinite" leaks into deep black/white.
-                            valid_mask = ((chroma_dist < 50) & (intensity_dist < 180)).astype(np.uint8)
+                            # Chroma < 45 (Safe)
+                            # Intensity < 185 (Relaxed 150->185) to fill holes in textured walls
+                            valid_mask = ((chroma_dist < 45) & (intensity_dist < 185)).astype(np.uint8)
 
                     # --- EDGE GUARD ---
-                    if level == 2:
-                        edge_barrier = np.ones((h, w), dtype=np.uint8) # No barriers
-                    else:
-                        # Sharpened blur to catch structural edges
-                        # INCREASED BLUR (5x5 -> 9x9) to ignore brick textures/mortar lines.
-                        edge_gray = cv2.GaussianBlur(cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY), (9, 9), 0)
-                        
-                        grad_x = cv2.Sobel(edge_gray, cv2.CV_16S, 1, 0, ksize=3)
-                        grad_y = cv2.Sobel(edge_gray, cv2.CV_16S, 0, 1, ksize=3)
-                        abs_grad_x = cv2.convertScaleAbs(grad_x)
-                        abs_grad_y = cv2.convertScaleAbs(grad_y)
-                        edges = cv2.addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0)
-                        
-                        e_thresh = 80 # Stricter (70->80): Only block if edge is very strong (Structural)
-                        _, edge_barrier = cv2.threshold(edges, e_thresh, 255, cv2.THRESH_BINARY_INV)
-                        edge_barrier = (edge_barrier / 255).astype(np.uint8)
-                        
-                        # Thin barrier (iterations=1) instead of thick, to allow closer fit
-                        edge_barrier = cv2.erode(edge_barrier, np.ones((3, 3), np.uint8), iterations=1)
-                        
-                        # SAFETY Zone around click
-                        cv2.circle(edge_barrier, (cx, cy), 15, 1, -1)
-
+                    # Always run edge detection to catch structural boundaries (Ceiling vs Wall)
+                    edge_gray = cv2.GaussianBlur(cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY), (9, 9), 0)
+                    # Sobel Edge Detection (Gradient) - Detects structural lines
+                    lx = cv2.Sobel(edge_gray, cv2.CV_64F, 1, 0, ksize=5)
+                    ly = cv2.Sobel(edge_gray, cv2.CV_64F, 0, 1, ksize=5)
+                    edges = cv2.magnitude(lx, ly)
+                    
+                    # Normalize edges
+                    edges = cv2.normalize(edges, None, 0, 255, cv2.NORM_MINMAX, dtype=np.uint8)
+                    
+                    # Threshold strong edges
+                    # Level 2 (Whole Object) -> Threshold 85 (Was 100). 
+                    # This allows structural corners (Ceiling/Wall) to block the leak, while passing texture.
+                    e_thresh = 85 if selected_level == 2 else 80
+                    
+                    _, edge_barrier = cv2.threshold(edges, e_thresh, 255, cv2.THRESH_BINARY_INV)
+                    edge_barrier = (edge_barrier / 255).astype(np.uint8)
+                    edge_barrier = cv2.erode(edge_barrier, np.ones((3, 3), np.uint8), iterations=1)
+        
                     # Intersect SAM mask with Adaptive Boundaries
-                    if level != 2:
-                        mask_refined = (mask_uint8 & valid_mask & edge_barrier)
-                    else:
-                        mask_refined = mask_uint8
+                    # FILTER: Apply strict intersection even for Level 2 now (to stop leaks)
+                    mask_refined = (mask_uint8 & valid_mask & edge_barrier)
                     
                     # --- HOLE FILLING (CRITICAL FOR UNIFORM LOOK) ---
-                    # Close small holes (e.g. noise in shadows)
-                    # Kernel 5x5 is strong enough to fill jagged gaps but preserve shape
-                    kernel_close = np.ones((5, 5), np.uint8)
+                    # Increased kernel (5->9) to fill the "bleaching" holes in large areas
+                    kernel_close = np.ones((9, 9), np.uint8)
                     mask_refined = cv2.morphologyEx(mask_refined, cv2.MORPH_CLOSE, kernel_close)
                     
                     # Open to remove tiny flying pixels (leaks)
