@@ -2,7 +2,12 @@ import numpy as np
 import torch
 import cv2
 import logging
+import os
 from mobile_sam import sam_model_registry, SamPredictor
+
+# Force disable OpenCL to prevent "Bad Argument" / "UMat" errors on Streamlit Cloud
+cv2.ocl.setUseOpenCL(False)
+os.environ["OPENCV_OPENCL_RUNTIME"] = "disabled"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -160,30 +165,35 @@ class SegmentationEngine:
                             # Intensity < 185 (Relaxed 150->185) to fill holes in textured walls
                             valid_mask = ((chroma_dist < 45) & (intensity_dist < 185)).astype(np.uint8)
 
-                    # --- EDGE GUARD ---
-                    # Always run edge detection to catch structural boundaries (Ceiling vs Wall)
-                    edge_gray = cv2.GaussianBlur(cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY), (9, 9), 0)
-                    # Sobel Edge Detection (Gradient) - Detects structural lines
-                    lx = cv2.Sobel(edge_gray, cv2.CV_64F, 1, 0, ksize=5)
-                    ly = cv2.Sobel(edge_gray, cv2.CV_64F, 0, 1, ksize=5)
-                    edges = cv2.magnitude(lx, ly)
-                    
-                    # Normalize edges
-                    e_min, e_max = np.min(edges), np.max(edges)
-                    if e_max > e_min:
-                        edges = (edges - e_min) * (255.0 / (e_max - e_min))
-                    else:
-                        edges = np.zeros_like(edges)
-                    edges = edges.astype(np.uint8)
-                    
-                    # Threshold strong edges
-                    # Level 2 (Whole Object) -> Threshold 85 (Was 100). 
-                    # This allows structural corners (Ceiling/Wall) to block the leak, while passing texture.
-                    e_thresh = 85 if selected_level == 2 else 80
-                    
-                    _, edge_barrier = cv2.threshold(edges, e_thresh, 255, cv2.THRESH_BINARY_INV)
-                    edge_barrier = (edge_barrier / 255).astype(np.uint8)
-                    edge_barrier = cv2.erode(edge_barrier, np.ones((3, 3), np.uint8), iterations=1)
+                    try:
+                        # --- EDGE GUARD ---
+                        logger.info("Starting Edge Guard process...")
+                        edge_gray = cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY)
+                        edge_gray = cv2.GaussianBlur(edge_gray, (9, 9), 0)
+                        
+                        logger.info("Computing Sobel gradients...")
+                        lx = cv2.Sobel(edge_gray, cv2.CV_64F, 1, 0, ksize=5)
+                        ly = cv2.Sobel(edge_gray, cv2.CV_64F, 0, 1, ksize=5)
+                        
+                        logger.info("Computing magnitude via NumPy...")
+                        edges = np.sqrt(lx**2 + ly**2)
+                        
+                        logger.info("Applying manual normalization (NumPy)...")
+                        e_min, e_max = np.min(edges), np.max(edges)
+                        if e_max > e_min:
+                            edges_norm = ((edges - e_min) * (255.0 / (e_max - e_min))).astype(np.uint8)
+                        else:
+                            edges_norm = np.zeros(edges.shape, dtype=np.uint8)
+                        
+                        logger.info("Applying threshold and erosion...")
+                        e_thresh = 85 if selected_level == 2 else 80
+                        _, edge_barrier = cv2.threshold(edges_norm, e_thresh, 255, cv2.THRESH_BINARY_INV)
+                        edge_barrier = (edge_barrier / 255).astype(np.uint8)
+                        edge_barrier = cv2.erode(edge_barrier, np.ones((3, 3), np.uint8), iterations=1)
+                        logger.info("Edge Guard completed successfully.")
+                    except Exception as e:
+                        logger.error(f"⚠️ Edge Guard Error (Bypassing to prevent crash): {e}")
+                        edge_barrier = np.ones(self.image_rgb.shape[:2], dtype=np.uint8)
         
                     # Intersect SAM mask with Adaptive Boundaries
                     # FILTER: Apply strict intersection even for Level 2 now (to stop leaks)
