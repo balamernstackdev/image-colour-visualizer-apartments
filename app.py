@@ -30,8 +30,8 @@ torch.backends.cudnn.benchmark = False # Save more RAM
 
 # 🚀 DEPLOYMENT VERSION SYNC (Step Id 1714+)
 # Increment this to force Streamlit Cloud to discard old AI logic caches.
-CACHE_SALT = "V1.7.0-WALL-SEPARATION"
-APP_VERSION = "1.7.0"
+CACHE_SALT = "V1.7.4-SMART-SEPARATION"
+APP_VERSION = "1.7.4"
 
 from streamlit_image_coordinates import streamlit_image_coordinates
 from streamlit_image_comparison import image_comparison

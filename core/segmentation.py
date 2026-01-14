@@ -102,9 +102,9 @@ class SegmentationEngine:
             # Use relaxed guards for "Small Details" (Level 0) or Auto to fill gaps/shadows.
             if level == 2: # Big Surfaces
                 thresh_intensity = 100 # Balanced: Allows DEEP shadows on white (was 65)
-                thresh_edge = 50      # Optimized: Catches Wall Corners (50), Ignores Molding (<30)
+                thresh_edge = 25      # Ultra Strict: Catches faint corner shadows (25)
                 erode_iters = 0       # No barrier thickening: Max coverage
-                kernel_size = 7       # Strong healing: Smooths jagged lines (was 5)
+                kernel_size = 5       # Precise healing: Preserves thin barriers (was 9)
             elif level == 0: # Small Details (Strict Precision)
                 thresh_intensity = 45 # Strict: Stops at minor color changes
                 thresh_edge = 40      # Greedy: Prioritize coverage (was 35)
@@ -152,7 +152,7 @@ class SegmentationEngine:
                     valid_mask = (intensity_dist < 255) & (chroma_dist < 60)
                 else:
                     # Chroma 38 is approx 0.15 in fixed point (0.15 * 256)
-                    valid_mask = (chroma_dist < 38) & (intensity_dist < 180)
+                    valid_mask = (chroma_dist < 38) & (intensity_dist < thresh_intensity)
 
                 valid_mask = valid_mask.astype(np.uint8)
                 
@@ -177,7 +177,7 @@ class SegmentationEngine:
                     # --- DYNAMIC TEXTURE DETECTION (v1.6.0) ---
                     # Check if the click point is on a textured surface (rug) or smooth (wall).
                     # Rugs have high local gradient variance. Walls are smooth.
-                    r_tex = 20
+                    r_tex = 40 # Wide Scan: Sees nearby holes as 'texture' to disable guard
                     y1, y2 = max(0, cy-r_tex), min(grad_norm.shape[0], cy+r_tex)
                     x1, x2 = max(0, cx-r_tex), min(grad_norm.shape[1], cx+r_tex)
                     seed_roi = grad_norm[y1:y2, x1:x2]
@@ -191,7 +191,7 @@ class SegmentationEngine:
                     # DYNAMIC OVERRIDE: If painting White/Gray surfaces, use STRICTER edges (35)
                     # to catch faint shadow lines (like wall vs ceiling).
                     # If painting Colors, use RELAXED edges (45) to ignore molding shadows.
-                    effective_thresh_edge = 80 if is_grayscale_seed and level == 2 else thresh_edge
+                    effective_thresh_edge = 35 if is_grayscale_seed and level == 2 else thresh_edge
                     
                     _, edge_mask = cv2.threshold(grad_norm, effective_thresh_edge, 255, cv2.THRESH_BINARY_INV)
                     
