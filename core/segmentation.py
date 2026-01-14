@@ -101,7 +101,7 @@ class SegmentationEngine:
             # Use strict guards for "Big Surfaces" (Level 2) to prevent bleeding.
             # Use relaxed guards for "Small Details" (Level 0) or Auto to fill gaps/shadows.
             if level == 2: # Big Surfaces
-                thresh_intensity = 65 # Balanced: Allows shadows, stops at color change
+                thresh_intensity = 100 # Balanced: Allows DEEP shadows on white (was 65)
                 thresh_edge = 45      # Sweet Spot: Ignores molding shadows (was 40)
                 erode_iters = 0       # No barrier thickening: Max coverage
                 kernel_size = 7       # Strong healing: Smooths jagged lines (was 5)
@@ -149,7 +149,7 @@ class SegmentationEngine:
                     # BALANCED GUARD (v1.5.5): Adaptive Tolerance
                     # Even for white walls, reject Strong Colors (like yellow sofa)
                     # Use relaxed chroma (60) to allow tinted shadows but stop objects.
-                    valid_mask = (intensity_dist < thresh_intensity) & (chroma_dist < 60)
+                    valid_mask = (intensity_dist < 210) & (chroma_dist < 60)
                 else:
                     # Chroma 38 is approx 0.15 in fixed point (0.15 * 256)
                     valid_mask = (chroma_dist < 38) & (intensity_dist < 180)
@@ -180,7 +180,7 @@ class SegmentationEngine:
                     # DYNAMIC OVERRIDE: If painting White/Gray surfaces, use STRICTER edges (35)
                     # to catch faint shadow lines (like wall vs ceiling).
                     # If painting Colors, use RELAXED edges (45) to ignore molding shadows.
-                    effective_thresh_edge = 35 if is_grayscale_seed and level == 2 else thresh_edge
+                    effective_thresh_edge = 45 if is_grayscale_seed and level == 2 else thresh_edge
                     
                     _, edge_mask = cv2.threshold(grad_norm, effective_thresh_edge, 255, cv2.THRESH_BINARY_INV)
                     
@@ -202,7 +202,7 @@ class SegmentationEngine:
                 # Exclude high-frequency areas (screens, art, textured objects) even if color matches.
                 # Use the 'grad_norm' we already computed for edges.
                 # Walls are flat (Low Gradient). Detailed objects are busy (High Gradient).
-                thresh_texture = 15 # Sensitivity: Lower = stricter protection for screens
+                thresh_texture = 30 # Sensitivity: Higher = allows more lighting variations (was 15)
                 
                 # We need a dense variance map, not just edges.
                 # Use a larger blur for "Busy-ness" detection
