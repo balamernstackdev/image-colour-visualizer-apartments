@@ -102,7 +102,7 @@ class SegmentationEngine:
             # Use relaxed guards for "Small Details" (Level 0) or Auto to fill gaps/shadows.
             if level == 2: # Big Surfaces
                 thresh_intensity = 100 # Balanced: Allows DEEP shadows on white (was 65)
-                thresh_edge = 45      # Sweet Spot: Ignores molding shadows (was 40)
+                thresh_edge = 80      # High Threshold: Stops at CABINETS (80+), ignores MOLDING (<80)
                 erode_iters = 0       # No barrier thickening: Max coverage
                 kernel_size = 7       # Strong healing: Smooths jagged lines (was 5)
             elif level == 0: # Small Details (Strict Precision)
@@ -126,7 +126,7 @@ class SegmentationEngine:
                 
                 # Check if seed is Grayscale (Saturation check)
                 seed_sat = np.max(seed_color) - np.min(seed_color)
-                is_grayscale_seed = seed_sat < 20 # Low saturation
+                is_grayscale_seed = seed_sat < 40 # Low saturation (increased to 40 to catch warm lights)
                 
                 # 1. Chromaticity (Color only, invariant to brightness/shadows)
                 # OPTIMIZATION: Use uint16 for distance check to avoid heavy float32 conversion
@@ -174,13 +174,24 @@ class SegmentationEngine:
                     # Normalize to 0-255
                     grad_norm = cv2.normalize(grad, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
                     
+                    # --- DYNAMIC TEXTURE DETECTION (v1.6.0) ---
+                    # Check if the click point is on a textured surface (rug) or smooth (wall).
+                    # Rugs have high local gradient variance. Walls are smooth.
+                    r_tex = 20
+                    y1, y2 = max(0, cy-r_tex), min(grad_norm.shape[0], cy+r_tex)
+                    x1, x2 = max(0, cx-r_tex), min(grad_norm.shape[1], cx+r_tex)
+                    seed_roi = grad_norm[y1:y2, x1:x2]
+                    
+                    seed_texture_score = np.mean(seed_roi) if seed_roi.size > 0 else 0
+                    is_textured_surface = seed_texture_score > 20 # Threshold: Wall ~5, Rug ~30+
+                    
                     # Threshold to find strong lines (The "Barrier")
                     # BALANCED GUARD (v1.5.5): Adaptive Edge Threshold
                     
                     # DYNAMIC OVERRIDE: If painting White/Gray surfaces, use STRICTER edges (35)
                     # to catch faint shadow lines (like wall vs ceiling).
                     # If painting Colors, use RELAXED edges (45) to ignore molding shadows.
-                    effective_thresh_edge = 45 if is_grayscale_seed and level == 2 else thresh_edge
+                    effective_thresh_edge = 80 if is_grayscale_seed and level == 2 else thresh_edge
                     
                     _, edge_mask = cv2.threshold(grad_norm, effective_thresh_edge, 255, cv2.THRESH_BINARY_INV)
                     
@@ -188,9 +199,9 @@ class SegmentationEngine:
                     kernel = np.ones((2, 2), np.uint8)
                     edge_mask = cv2.erode(edge_mask, kernel, iterations=erode_iters)
                     
-                    # Apply Edge Barrier (SKIP for White Walls to prevent molding fragmentation)
-                    if not (is_grayscale_seed and level == 2):
-                        mask_refined = cv2.bitwise_and(mask_refined, mask_refined, mask=edge_mask)
+                    # Apply Edge Barrier (Dynamic: Enabled for Walls, Disabled for Rugs)
+                    if level == 2 and not is_textured_surface:
+                         mask_refined = cv2.bitwise_and(mask_refined, mask_refined, mask=edge_mask)
                     
                     # BALANCED GUARD (v1.5.5): Adaptive Healing
                     kernel_heal = np.ones((kernel_size, kernel_size), np.uint8)
@@ -217,7 +228,8 @@ class SegmentationEngine:
                 # Actually, simply AND-ing can kill valid textured walls (bricks).
                 # Only apply Texture Guard if we are in "Level 2 (Big Surfaces)" where we expect flatness.
                 # AND Only if NOT Grayscale/White Seed (to allow white moldings/shadows).
-                if level == 2 and not is_grayscale_seed:
+                # UPDATED (v1.5.8): DISABLED for Level 2 entirely to prevent holes at molding/lights.
+                if False: # level == 2 and not is_grayscale_seed:
                     mask_refined = mask_refined & texture_mask
                 
                 # Safety Fallback for Textured Walls:
