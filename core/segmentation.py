@@ -149,7 +149,7 @@ class SegmentationEngine:
                     # BALANCED GUARD (v1.5.5): Adaptive Tolerance
                     # Even for white walls, reject Strong Colors (like yellow sofa)
                     # Use relaxed chroma (60) to allow tinted shadows but stop objects.
-                    valid_mask = (intensity_dist < 210) & (chroma_dist < 60)
+                    valid_mask = (intensity_dist < 255) & (chroma_dist < 60)
                 else:
                     # Chroma 38 is approx 0.15 in fixed point (0.15 * 256)
                     valid_mask = (chroma_dist < 38) & (intensity_dist < 180)
@@ -188,8 +188,9 @@ class SegmentationEngine:
                     kernel = np.ones((2, 2), np.uint8)
                     edge_mask = cv2.erode(edge_mask, kernel, iterations=erode_iters)
                     
-                    # Apply Edge Barrier
-                    mask_refined = cv2.bitwise_and(mask_refined, mask_refined, mask=edge_mask)
+                    # Apply Edge Barrier (SKIP for White Walls to prevent molding fragmentation)
+                    if not (is_grayscale_seed and level == 2):
+                        mask_refined = cv2.bitwise_and(mask_refined, mask_refined, mask=edge_mask)
                     
                     # BALANCED GUARD (v1.5.5): Adaptive Healing
                     kernel_heal = np.ones((kernel_size, kernel_size), np.uint8)
