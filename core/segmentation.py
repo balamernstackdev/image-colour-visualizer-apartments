@@ -102,7 +102,7 @@ class SegmentationEngine:
             # Use relaxed guards for "Small Details" (Level 0) or Auto to fill gaps/shadows.
             if level == 2: # Big Surfaces
                 thresh_intensity = 100 # Balanced: Allows DEEP shadows on white (was 65)
-                thresh_edge = 80      # High Threshold: Stops at CABINETS (80+), ignores MOLDING (<80)
+                thresh_edge = 50      # Optimized: Catches Wall Corners (50), Ignores Molding (<30)
                 erode_iters = 0       # No barrier thickening: Max coverage
                 kernel_size = 7       # Strong healing: Smooths jagged lines (was 5)
             elif level == 0: # Small Details (Strict Precision)

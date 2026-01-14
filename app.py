@@ -30,8 +30,8 @@ torch.backends.cudnn.benchmark = False # Save more RAM
 
 # 🚀 DEPLOYMENT VERSION SYNC (Step Id 1714+)
 # Increment this to force Streamlit Cloud to discard old AI logic caches.
-CACHE_SALT = "V1.6.0-DYNAMIC-TEXTURE"
-APP_VERSION = "1.6.0"
+CACHE_SALT = "V1.7.0-WALL-SEPARATION"
+APP_VERSION = "1.7.0"
 
 from streamlit_image_coordinates import streamlit_image_coordinates
 from streamlit_image_comparison import image_comparison
@@ -110,7 +110,27 @@ def setup_styles():
         /* HIDE DEFAULT STREAMLIT ELEMENTS */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
-        header {visibility: hidden;}
+        /* header {visibility: hidden;} <-- REMOVED: Hides sidebar toggle */
+        
+        /* RESTORE SIDEBAR TOGGLE (Fixed v1.6.3) */
+        [data-testid="collapsedControl"], [data-testid="stSidebarCollapsedControl"] {
+            display: block;
+            visibility: visible !important;
+            color: var(--primary);
+            background-color: white;
+            border-radius: 50%;
+            padding: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            position: fixed; /* Force it to stay relative to screen */
+            top: 1rem;
+            left: 1rem;
+            z-index: 1000000; /* Ensure it's on top of everything */
+            transition: all 0.2s ease;
+        }
+        [data-testid="collapsedControl"]:hover, [data-testid="stSidebarCollapsedControl"]:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
         
         /* MODERN SIDEBAR */
         section[data-testid="stSidebar"] {
@@ -483,33 +503,33 @@ def render_sidebar(sam, device_str):
         # --- ACTIVE SELECTION HUB (New Workflow) ---
         st.divider()
         
+        # --- GLOBAL COLOR PICKER (Moved Outside v1.6.1) ---
+        st.subheader("🎨 Color Palette")
+        
+        preset_colors = {
+            "White": "#FFFFFF", "Cream": "#FFFDD0", "Sage Green": "#8FBC8F",
+            "Sky Blue": "#87CEEB", "Lavender": "#E6E6FA", "Peach": "#FFDAB9",
+            "Terracotta": "#E2725B", "Forest Green": "#228B22", "Royal Blue": "#4169E1",
+            "Midnight Navy": "#000080", "Charcoal": "#36454F", "Black": "#000000"
+        }
+        
+        selected_preset = st.selectbox("Color Collection", list(preset_colors.keys()), key="active_preset_selector")
+        
+        if "last_active_preset" not in st.session_state:
+            st.session_state["last_active_preset"] = selected_preset
+        
+        if st.session_state["last_active_preset"] != selected_preset:
+            st.session_state["picked_color"] = preset_colors[selected_preset]
+            st.session_state["last_active_preset"] = selected_preset
+        
+        picked_color = st.color_picker("Custom Color", st.session_state.get("picked_color", preset_colors[selected_preset]))
+        st.session_state["picked_color"] = picked_color
+        
+        st.divider()
+        
         if st.session_state.get("active_selection"):
             st.subheader("✨ Active Object")
-            st.caption("Step 2: Choose color and Apply")
-            
-            # Color Picker for the Active Selection
-            preset_colors = {
-                "White": "#FFFFFF", "Cream": "#FFFDD0", "Sage Green": "#8FBC8F",
-                "Sky Blue": "#87CEEB", "Lavender": "#E6E6FA", "Peach": "#FFDAB9",
-                "Terracotta": "#E2725B", "Forest Green": "#228B22", "Royal Blue": "#4169E1",
-                "Midnight Navy": "#000080", "Charcoal": "#36454F", "Black": "#000000"
-            }
-            
-            # Preset Selector
-            selected_preset = st.selectbox("Color Collection", list(preset_colors.keys()), key="active_preset_selector")
-            
-            # Determine default color
-            if "last_active_preset" not in st.session_state:
-                st.session_state["last_active_preset"] = selected_preset
-            
-            if st.session_state["last_active_preset"] != selected_preset:
-                # Preset changed, update picker
-                st.session_state["picked_color"] = preset_colors[selected_preset]
-                st.session_state["last_active_preset"] = selected_preset
-            
-            # Custom Picker
-            picked_color = st.color_picker("Custom Color", st.session_state.get("picked_color", preset_colors[selected_preset]))
-            st.session_state["picked_color"] = picked_color
+            st.caption("Step 2: Apply Color")
             
             # --- SELECTION REFINEMENT MODE (Restored v1.4.3) ---
             with st.container():
@@ -1441,11 +1461,9 @@ def main():
     else:
         # Landing Page
         st.markdown("""
-        <div class="landing-header">
-            <h1>Welcome to Color Visualizer</h1>
-        </div>
-        <div class="landing-sub">
-            <p>Upload a photo of your room to start experimenting with colors.</p>
+        <div style="text-align: center; margin-top: 50px;">
+            <h1 style="color: #2C3E50; font-size: 3rem;">Welcome to Color Visualizer</h1>
+            <p style="font-size: 1.2rem; color: #666;">Upload a photo of your room to start experimenting with colors.</p>
         </div>
         """, unsafe_allow_html=True)
         
