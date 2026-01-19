@@ -96,7 +96,7 @@ class SegmentationEngine:
         mask_uint8 = (best_mask * 255).astype(np.uint8)
 
         if cleanup:
-            # --- COLOR-BASED WALL SEPARATION (NEW) ---
+            # --- COLOR-BASED WALL SEPARATION (Balanced) ---
             # This prevents selecting the entire building when clicking one wall
             if use_texture_guard and self.image_rgb is not None and len(point_coords) > 0:
                 # Get the clicked point's color
@@ -105,7 +105,7 @@ class SegmentationEngine:
                 cx, cy = max(0, min(cx, w - 1)), max(0, min(cy, h - 1))
                 
                 # Sample a small region around the click for color reference
-                sample_size = 10
+                sample_size = 15  # Slightly larger sample for better color average
                 y1, y2 = max(0, cy - sample_size), min(h, cy + sample_size)
                 x1, x2 = max(0, cx - sample_size), min(w, cx + sample_size)
                 clicked_color = np.median(self.image_rgb[y1:y2, x1:x2], axis=(0, 1))
@@ -114,26 +114,26 @@ class SegmentationEngine:
                 color_diff = np.sqrt(np.sum((self.image_rgb.astype(float) - clicked_color) ** 2, axis=2))
                 
                 # Create color fence: areas that are too different in color
-                # Adaptive threshold based on the scene's color variance
-                if level == 2:  # Walls - be more strict
-                    color_threshold = 40  # Stricter for large surfaces
+                # More lenient thresholds to handle lighting and shadows on same wall
+                if level == 2:  # Walls - balanced to allow lighting variations
+                    color_threshold = 70  # Relaxed to handle shadows/highlights on same wall
                 else:
-                    color_threshold = 60  # More lenient for details
+                    color_threshold = 80  # More lenient for details
                     
                 color_fence = (color_diff > color_threshold).astype(np.uint8) * 255
                 
-                # Dilate the color fence to create hard boundaries
-                color_fence = cv2.dilate(color_fence, np.ones((5, 5), np.uint8), iterations=2)
+                # Moderate dilation - enough to separate but not too aggressive
+                color_fence = cv2.dilate(color_fence, np.ones((3, 3), np.uint8), iterations=1)
                 
                 # Apply color fence: remove mask where color is too different
                 mask_uint8[color_fence > 0] = 0
             
-            # --- SURGICAL BOUNDARY PROTECTION (Enhanced) ---
+            # --- SURGICAL BOUNDARY PROTECTION (Balanced) ---
             if use_texture_guard and self.image_rgb is not None:
                 gray = cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY)
-                # Much stricter edge detection for architectural boundaries
-                edges = cv2.Canny(gray, 15, 80)  # Lower thresholds to catch more edges
-                fence = cv2.dilate(edges, np.ones((5, 5), np.uint8), iterations=2)  # Stronger dilation
+                # Balanced edge detection - catch boundaries without cutting into surfaces
+                edges = cv2.Canny(gray, 25, 100)  # Moderate thresholds
+                fence = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)  # Moderate dilation
                 
                 # Apply strictly: If an edge is detected, it's a hard stop
                 mask_uint8[fence > 0] = 0
@@ -144,9 +144,9 @@ class SegmentationEngine:
                 kernel_clean = np.ones((5, 5), np.uint8)
                 mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel_clean)
                 
-                # 2. Safety Erosion to pull back from messy architectural edges
+                # 2. Light erosion to pull back from edges slightly
                 kernel_erode = np.ones((3, 3), np.uint8)
-                mask_uint8 = cv2.erode(mask_uint8, kernel_erode, iterations=2)  # Increased from 1 to 2
+                mask_uint8 = cv2.erode(mask_uint8, kernel_erode, iterations=1)  # Back to 1 for better coverage
                 
                 mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel_clean)
             else:
