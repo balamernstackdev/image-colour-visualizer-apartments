@@ -157,51 +157,62 @@ class ColorTransferEngine:
             opacity = data.get('opacity', 1.0)
             final_mask_soft = mask_soft * opacity
             
-            # --- PRO LUMINANCE BLEND ---
-            # Calculate object mean brightness to scale it
-            # We assume the mask defines the object.
-            # Performance note: cv2.mean is fast.
+            # --- PRO LUMINANCE BLEND v2.3 (Frequency Separation) ---
+            # To fix "invalid shadow/pattern", we separate the image into:
+            # 1. Lighting (Low Frequency) - We scale this to change brightness.
+            # 2. Texture (High Frequency) - We preserve this exactly to keep "Realistic" grain.
+            
             mask_u8 = (mask > 0).astype(np.uint8) * 255
-            mean_l = cv2.mean(L, mask=mask_u8)[0]
-            mean_l = max(mean_l, 10.0) # Avoid zero-div
             
-            # Scale L: L_new = L_orig * (Target / Mean)
-            # This "Relights" the object to the match the paint's brightness
-            factor = target_l / mean_l
+            # 1. Extract Texture (High Pass)
+            # Blur L to get Lighting
+            l_blur = cv2.GaussianBlur(L, (0, 0), sigmaX=3)
+            l_texture = L.astype(np.float32) - l_blur.astype(np.float32)
             
-            # Apply factor but blend with original based on selection opacity?
-            # Actually, standard paint fully covers. 
-            # We treat 'opacity' as Alpha.
-             
-            # Apply scaling
-            layer_L_float = L.astype(np.float32) * factor
+            # 2. Scale Lighting (Low Pass)
+            masked_l_blur = l_blur[mask > 0]
+            if masked_l_blur.size > 0:
+                base_l_val = np.median(masked_l_blur)
+            else:
+                base_l_val = 50.0
+            base_l_val = max(base_l_val, 5.0)
+            
+            factor = target_l / base_l_val
+            
+            # Soften extreme brightening to prevent washout
+            # If factor > 2.0 (Dark->Light), we clamp it slightly or mix with shift
+            if factor > 3.0: factor = 3.0 
+            
+            # Apply scale to Lighting ONLY
+            l_new_base = l_blur.astype(np.float32) * factor
+            
+            # 3. Enhance & Re-Add Texture
+            # We boost texture slightly (1.2x) to fix "worst visibility"
+            l_new_detail = l_texture * 1.2
+            
+            layer_L_float = l_new_base + l_new_detail
             
             # --- FINISH APPLICATION (Matte/Glossy) ---
             finish = data.get('finish', 'Standard')
             if finish != 'Standard':
-                # Center around mean lightness to adjust contrast
-                mean_l_val = np.mean(layer_L_float[mask_u8 > 0])
-                
                 if finish == 'Matte':
-                    # Reduce contrast (0.85x) for flatter look
-                    contrast = 0.85 
+                    # Reduce texture visibility for matte
+                    l_new_detail *= 0.7 
+                    # Flatten base lighting
+                    layer_L_float = target_l + (layer_L_float - target_l) * 0.9
                 elif finish == 'Glossy':
-                    # Increase contrast (1.25x) for shiny look
-                    contrast = 1.25
-                else:
-                    contrast = 1.0
-                
-                # Apply contrast: New = Mean + (Old - Mean) * Contrast
-                layer_L_float = mean_l_val + (layer_L_float - mean_l_val) * contrast
+                    # Boost highlights in base lighting
+                    layer_L_float = target_l + (layer_L_float - target_l) * 1.15
             
-            layer_L_float = np.clip(layer_L_float, 0, 255)
+            # 4. Soft Clipping (Knee)
+            # Instead of hard clip at 100, we compress highlights > 90
+            # Standard clamp for now to ensure valid range 0-100 for LAB
+            layer_L_float = np.clip(layer_L_float, 0, 100)
             
             # Cumulative Blend for L
-            # Mix layer_L into curr_L
             curr_L = (layer_L_float * final_mask_soft) + (curr_L * (1.0 - final_mask_soft))
-
+            
             # Cumulative Blend A/B
-            # Result = Target * Mask + Background * (1 - Mask)
             curr_A = (target_a * final_mask_soft) + (curr_A * (1.0 - final_mask_soft))
             curr_B = (target_b * final_mask_soft) + (curr_B * (1.0 - final_mask_soft))
 
