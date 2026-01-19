@@ -96,12 +96,44 @@ class SegmentationEngine:
         mask_uint8 = (best_mask * 255).astype(np.uint8)
 
         if cleanup:
-            # --- SURGICAL BOUNDARY PROTECTION ---
+            # --- COLOR-BASED WALL SEPARATION (NEW) ---
+            # This prevents selecting the entire building when clicking one wall
+            if use_texture_guard and self.image_rgb is not None and len(point_coords) > 0:
+                # Get the clicked point's color
+                cx, cy = int(point_coords[0][0]), int(point_coords[0][1])
+                h, w = self.image_rgb.shape[:2]
+                cx, cy = max(0, min(cx, w - 1)), max(0, min(cy, h - 1))
+                
+                # Sample a small region around the click for color reference
+                sample_size = 10
+                y1, y2 = max(0, cy - sample_size), min(h, cy + sample_size)
+                x1, x2 = max(0, cx - sample_size), min(w, cx + sample_size)
+                clicked_color = np.median(self.image_rgb[y1:y2, x1:x2], axis=(0, 1))
+                
+                # Calculate color distance map (how different each pixel is from clicked color)
+                color_diff = np.sqrt(np.sum((self.image_rgb.astype(float) - clicked_color) ** 2, axis=2))
+                
+                # Create color fence: areas that are too different in color
+                # Adaptive threshold based on the scene's color variance
+                if level == 2:  # Walls - be more strict
+                    color_threshold = 40  # Stricter for large surfaces
+                else:
+                    color_threshold = 60  # More lenient for details
+                    
+                color_fence = (color_diff > color_threshold).astype(np.uint8) * 255
+                
+                # Dilate the color fence to create hard boundaries
+                color_fence = cv2.dilate(color_fence, np.ones((5, 5), np.uint8), iterations=2)
+                
+                # Apply color fence: remove mask where color is too different
+                mask_uint8[color_fence > 0] = 0
+            
+            # --- SURGICAL BOUNDARY PROTECTION (Enhanced) ---
             if use_texture_guard and self.image_rgb is not None:
                 gray = cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY)
-                # Stricter edges for architectural boundaries (Sky, Pillars)
-                edges = cv2.Canny(gray, 20, 120) 
-                fence = cv2.dilate(edges, np.ones((3, 3), np.uint8))
+                # Much stricter edge detection for architectural boundaries
+                edges = cv2.Canny(gray, 15, 80)  # Lower thresholds to catch more edges
+                fence = cv2.dilate(edges, np.ones((5, 5), np.uint8), iterations=2)  # Stronger dilation
                 
                 # Apply strictly: If an edge is detected, it's a hard stop
                 mask_uint8[fence > 0] = 0
@@ -114,7 +146,7 @@ class SegmentationEngine:
                 
                 # 2. Safety Erosion to pull back from messy architectural edges
                 kernel_erode = np.ones((3, 3), np.uint8)
-                mask_uint8 = cv2.erode(mask_uint8, kernel_erode, iterations=1)
+                mask_uint8 = cv2.erode(mask_uint8, kernel_erode, iterations=2)  # Increased from 1 to 2
                 
                 mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel_clean)
             else:
