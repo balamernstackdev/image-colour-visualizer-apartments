@@ -96,7 +96,13 @@ class SegmentationEngine:
         mask_uint8 = (best_mask * 255).astype(np.uint8)
 
         if cleanup:
-            # --- COLOR-BASED WALL SEPARATION (Balanced) ---
+            # --- HOLE FILLING FIRST (NEW) ---
+            # Fill small holes caused by lighting variations BEFORE applying fences
+            # This ensures spotlights and shadows don't create gaps
+            kernel_fill = np.ones((7, 7), np.uint8)
+            mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel_fill)
+            
+            # --- COLOR-BASED WALL SEPARATION (Relaxed for Lighting) ---
             # This prevents selecting the entire building when clicking one wall
             if use_texture_guard and self.image_rgb is not None and len(point_coords) > 0:
                 # Get the clicked point's color
@@ -105,7 +111,7 @@ class SegmentationEngine:
                 cx, cy = max(0, min(cx, w - 1)), max(0, min(cy, h - 1))
                 
                 # Sample a small region around the click for color reference
-                sample_size = 15  # Slightly larger sample for better color average
+                sample_size = 20  # Larger sample to average out lighting
                 y1, y2 = max(0, cy - sample_size), min(h, cy + sample_size)
                 x1, x2 = max(0, cx - sample_size), min(w, cx + sample_size)
                 clicked_color = np.median(self.image_rgb[y1:y2, x1:x2], axis=(0, 1))
@@ -114,21 +120,21 @@ class SegmentationEngine:
                 color_diff = np.sqrt(np.sum((self.image_rgb.astype(float) - clicked_color) ** 2, axis=2))
                 
                 # Create color fence: areas that are too different in color
-                # More lenient thresholds to handle lighting and shadows on same wall
-                if level == 2:  # Walls - balanced to allow lighting variations
-                    color_threshold = 70  # Relaxed to handle shadows/highlights on same wall
+                # Very lenient to handle extreme lighting (spotlights, shadows)
+                if level == 2:  # Walls/Ceilings - very lenient for lighting
+                    color_threshold = 95  # High threshold to handle spotlights and dramatic lighting
                 else:
-                    color_threshold = 80  # More lenient for details
+                    color_threshold = 90  # Also lenient for details
                     
                 color_fence = (color_diff > color_threshold).astype(np.uint8) * 255
                 
-                # Moderate dilation - enough to separate but not too aggressive
+                # Minimal dilation - just enough to separate truly different surfaces
                 color_fence = cv2.dilate(color_fence, np.ones((3, 3), np.uint8), iterations=1)
                 
                 # Apply color fence: remove mask where color is too different
                 mask_uint8[color_fence > 0] = 0
             
-            # --- SURGICAL BOUNDARY PROTECTION (Balanced) ---
+            # --- SURGICAL BOUNDARY PROTECTION (Minimal) ---
             if use_texture_guard and self.image_rgb is not None:
                 gray = cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY)
                 # Balanced edge detection - catch boundaries without cutting into surfaces
