@@ -15,9 +15,9 @@ class QualityEngine:
         else:
             mask_u8 = mask.astype(np.uint8)
             
-        # 1. SAFETY MARGIN: Subtle erosion to prevent the Guided Filter from pulling mask over edges
-        kernel = np.ones((3, 3), np.uint8)
-        mask_u8 = cv2.erode(mask_u8, kernel, iterations=1)
+        # 1. SAFETY MARGIN: Removed to prevent edge gaps/halo
+        # kernel = np.ones((2, 2), np.uint8)
+        # mask_u8 = cv2.erode(mask_u8, kernel, iterations=1)
         
         mask_float = mask_u8.astype(np.float32) / 255.0
             

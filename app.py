@@ -14,6 +14,7 @@ import gc
 import warnings
 
 
+
 # 🛡️ WARNING SHIELD: Silence technical chatter from AI libraries
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -402,6 +403,62 @@ def get_sam_engine(checkpoint_path, model_type):
     """Wrapped getter."""
     return get_sam_engine_singleton(checkpoint_path, model_type, salt=CACHE_SALT)
 
+def render_loading_overlay(text="Processing...", subtext="Please wait a moment"):
+    """
+    Renders a professional dark-themed loading overlay.
+    Returns the placeholder so it can be cleared later.
+    """
+    placeholder = st.empty()
+    placeholder.markdown(f"""
+        <style>
+        .loader-overlay {{
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(14, 17, 23, 0.95);
+            backdrop-filter: blur(12px);
+            z-index: 9999999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }}
+        .loader-spinner {{
+            width: 70px;
+            height: 70px;
+            border: 6px solid rgba(255, 255, 255, 0.1);
+            border-top: 6px solid #FF5A5F;
+            border-radius: 50%;
+            animation: spin 1s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 20px rgba(255, 90, 95, 0.4);
+        }}
+        @keyframes spin {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        .loader-text {{
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 2.2rem;
+            color: #FFFFFF;
+            font-weight: 700;
+            letter-spacing: -1px;
+        }}
+        .loader-sub {{
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            color: #AAAAAA;
+            margin-top: 15px;
+            font-size: 1.2rem;
+            letter-spacing: 0.5px;
+        }}
+        </style>
+        <div class="loader-overlay">
+            <div class="loader-spinner"></div>
+            <div class="loader-text">{text}</div>
+            <div class="loader-sub">{subtext}</div>
+        </div>
+    """, unsafe_allow_html=True)
+    return placeholder
+
 # --- HELPER LOGIC ---
 def get_crop_params(image_width, image_height, zoom_level, pan_x, pan_y):
     """
@@ -755,32 +812,14 @@ def render_sidebar(sam, device_str, composite_full=None):
              st.session_state["picked_color"] = picked_color
              # We don't need to rerun here, the widget update handles it naturally
         
-        # GLOBAL FINISH (For Instant Mode) - Moved below Color for logical flow
-        # We need a persistent finish choice
         if st.session_state.get("instant_mode"):
-             st.caption("Material")
-             global_finish = st.selectbox(
-                 "Finish (Shine)", 
-                 ["Matte", "Satin", "Glossy"], 
-                 index=0, 
-                 key="global_finish_pref", 
-                 help="Determine how shiny the paint looks.\nMatte = Flat\nGlossy = Shiny"
-             )
+             st.caption("Material: Matte (Default)")
         
         st.divider()
         
         if st.session_state.get("active_selection"):
             st.subheader("✨ Active Object")
-            st.caption("Step 2: Apply Color")
-
-            # Finish Selector (Immediate Preview)
-            st.selectbox(
-                "Finish", 
-                ["Matte", "Satin", "Glossy"], 
-                index=0, 
-                key="active_finish",
-                help="Matte: Flat, dry look.\nSatin: Soft sheen.\nGlossy: Shiny, reflective."
-            )
+            st.caption("Step 2: Apply Color (Matte)")
             
             # --- SELECTION REFINEMENT MODE (Restored v1.4.3) ---
             with st.container():
@@ -963,49 +1002,53 @@ def render_sidebar(sam, device_str, composite_full=None):
                 # Create a card for each object
                 # Use border=True for distinct separation (Mocking a list item)
                 with st.container(border=True):
-                     # Optimized Columns: Vis(1) | Name(3) | Finish(2) | Delete(1)
-                     c1, c2, c3, c4 = st.columns([0.6, 3.0, 2.0, 0.8], vertical_alignment="center")
+                     # Optimized Columns: Vis(1) | Color(0.8) | Name(2.5) | Finish(2.5) | Delete(0.8)
+                     # Adjusted ratios to give more space to the dropdown and name
+                     c1, c_col, c2, c4 = st.columns([0.6, 0.6, 4.3, 0.8], vertical_alignment="center")
                      
                      # Visibility Toggle
                      with c1:
                          vis_icon = "👁️" if mask_data.get('visible', True) else "🚫"
-                         # Minimal button to save space
                          if st.button(vis_icon, key=f"vis_btn_{i}", help="Toggle Visibility"):
                              mask_data['visible'] = not mask_data.get('visible', True)
                              st.session_state["composited_cache"] = None
                              st.rerun()
 
+                     # Color Indicator
+                     with c_col:
+                         # Small color circle
+                         color_hex = mask_data.get('color', '#FFFFFF')
+                         st.markdown(
+                             f"""<div style='
+                                 width: 20px; height: 20px; 
+                                 background-color: {color_hex}; 
+                                 border-radius: 50%; 
+                                 border: 1px solid #666;
+                                 margin-top: 5px;
+                             '></div>""", 
+                             unsafe_allow_html=True
+                         )
+
                      # Object Name (Clickable)
                      with c2:
-                         display_name = f"{i+1}. {mask_data.get('name', 'Object')}"
-                         # Primary button for selected, Secondary for others
+                         # Use simpler naming if default
+                         current_name = mask_data.get('name', f"Surface {i+1}")
+                         if "Surface" in current_name and len(current_name) > 15:
+                             current_name = f"Surface {i+1}"
+                             
                          btn_type = "primary" if is_selected else "secondary" 
-                         if st.button(display_name, key=f"sel_btn_{i}", use_container_width=True, type=btn_type):
+                         if st.button(current_name, key=f"sel_btn_{i}", use_container_width=True, type=btn_type):
                              st.session_state["selected_layer_idx"] = i
                              st.session_state["active_selection"] = None
                              if mask_data.get("color"):
                                  st.session_state["picked_color"] = mask_data["color"]
                              st.rerun()
                      
-                     # Material Selector (Finish)
-                     with c3:
-                         current_finish = mask_data.get('finish', 'Matte')
-                         new_finish = st.selectbox(
-                             "Finish", 
-                             ["Matte", "Satin", "Glossy"], 
-                             index=["Matte", "Satin", "Glossy"].index(current_finish),
-                             key=f"finish_sel_{i}",
-                             label_visibility="collapsed"
-                         )
-                         if new_finish != current_finish:
-                             mask_data['finish'] = new_finish
-                             st.session_state["composited_cache"] = None
-                             st.rerun()
-
                      # Delete Action
                      with c4:
                          if st.button("🗑️", key=f"del_btn_{i}", help="Remove Object"):
-                             with st.spinner("Removing..."):
+                             spin = render_loading_overlay("Removing Object...", "Updating Composition")
+                             try:
                                  st.session_state["masks"].pop(i)
                                  if st.session_state.get("selected_layer_idx") == i:
                                      st.session_state["selected_layer_idx"] = None
@@ -1014,6 +1057,8 @@ def render_sidebar(sam, device_str, composite_full=None):
                                  st.session_state["bg_cache"] = None
                                  st.session_state["render_id"] += 1
                                  st.rerun()
+                             finally:
+                                 spin.empty()
             
             # Global Actions
             if st.button("🗑️ Clear All Objects", use_container_width=True):
@@ -1031,9 +1076,9 @@ def render_sidebar(sam, device_str, composite_full=None):
         st.divider()
         if st.session_state["image"] is not None and st.session_state["masks"]:
             if st.button("💎 Prepare High-Res Download", use_container_width=True, help="Processes your design at original resolution for maximum quality."):
-                with st.spinner("Processing 4K Export..."):
-                    try:
-                        # Scale Masks to Original Resolution
+                spin = render_loading_overlay("Processing 4K Export...", "Rendering High-Fidelity Output")
+                try:
+                    # Scale Masks to Original Resolution
                         original_img = st.session_state["image_original"]
                         oh, ow = original_img.shape[:2]
                         
@@ -1081,8 +1126,10 @@ def render_sidebar(sam, device_str, composite_full=None):
                         dl_pil.save(dl_buf, format="PNG")
                         st.session_state["last_export"] = dl_buf.getvalue()
                         st.success("✅ Download Ready!")
-                    except Exception as e:
-                        st.error(f"Export failed: {e}")
+                except Exception as e:
+                    st.error(f"Export failed: {e}")
+                finally:
+                    spin.empty()
 
             if st.session_state.get("last_export"):
                 st.download_button(
@@ -1167,8 +1214,8 @@ def render_zoom_controls():
             <div style='
                 text-align: center; 
                 font-weight: bold; 
-                background-color: #f0f2f6; 
-                color: #31333F;
+                background-color: #1A1A1A; 
+                color: #FFFFFF;
                 padding: 6px 10px; 
                 border-radius: 4px;
                 border: 1px solid #dcdcdc;
@@ -1270,10 +1317,13 @@ def main():
     # PERFORMANCE: Only show spinner on first load to avoid "Loading Interruption" on every click
     if not st.session_state.get("engine_ready", False):
         with placeholder.container():
-            with st.spinner(f"🚀 Initializing AI Engine on {device_str}..."):
+            spin = render_loading_overlay(f"Initializing AI Engine on {device_str}...", "Preparing Studio Environment")
+            try:
                 sam = get_sam_engine(CHECKPOINT_PATH, MODEL_TYPE)
                 if sam:
                     st.session_state["engine_ready"] = True
+            finally:
+                spin.empty()
     else:
         sam = get_sam_engine(CHECKPOINT_PATH, MODEL_TYPE)
     
@@ -1310,55 +1360,7 @@ def main():
             
             # --- PROFESSIONAL LOADING OVERLAY (Themed for Dark Mode Studio) ---
             # Inject CSS overlay, replacing standard spinner for a cleaner look
-            loading_placeholder = st.empty()
-            loading_placeholder.markdown("""
-                <style>
-                .loader-overlay {
-                    position: fixed;
-                    top: 0; left: 0; width: 100%; height: 100%;
-                    background: rgba(14, 17, 23, 0.95); /* Deep Dark Studio Background */
-                    backdrop-filter: blur(12px);
-                    z-index: 9999999;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                    align-items: center;
-                }
-                .loader-spinner {
-                    width: 70px;
-                    height: 70px;
-                    border: 6px solid rgba(255, 255, 255, 0.1);
-                    border-top: 6px solid #FF5A5F;
-                    border-radius: 50%;
-                    animation: spin 1s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
-                    margin-bottom: 30px;
-                    box-shadow: 0 4px 20px rgba(255, 90, 95, 0.4);
-                }
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-                .loader-text {
-                    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                    font-size: 2.2rem;
-                    color: #FFFFFF;
-                    font-weight: 700;
-                    letter-spacing: -1px;
-                }
-                .loader-sub {
-                    font-family: 'Segoe UI', Roboto, sans-serif;
-                    color: #AAAAAA;
-                    margin-top: 15px;
-                    font-size: 1.2rem;
-                    letter-spacing: 0.5px;
-                }
-                </style>
-                <div class="loader-overlay">
-                    <div class="loader-spinner"></div>
-                    <div class="loader-text">Analyzing Room Structure...</div>
-                    <div class="loader-sub">Preparing Studio AI Engine</div>
-                </div>
-            """, unsafe_allow_html=True)
+            loading_placeholder = render_loading_overlay("Analyzing Room Structure...", "Preparing Studio AI Engine")
             
             lock = get_global_lock()
             with lock: 
@@ -1497,13 +1499,65 @@ def main():
                      active_sel['labels'].append(st.session_state.get("click_label", 1))
                      
                      # Re-generate mask using ALL points (Contextual Refinement)
-                     with st.spinner("AI Refining Selection..."):
+                     refine_placeholder = st.empty()
+                     refine_placeholder.markdown("""
+                         <style>
+                         .refine-overlay {
+                             position: fixed;
+                             top: 0; left: 0; width: 100%; height: 100%;
+                             background: rgba(14, 17, 23, 0.98);
+                             backdrop-filter: blur(10px);
+                             z-index: 9999999;
+                             display: flex;
+                             flex-direction: column;
+                             justify-content: center;
+                             align-items: center;
+                         }
+                         .refine-spinner {
+                             width: 60px;
+                             height: 60px;
+                             border: 5px solid rgba(255, 255, 255, 0.1);
+                             border-top: 5px solid #FF5A5F;
+                             border-radius: 50%;
+                             animation: spin-refine 0.8s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
+                             margin-bottom: 25px;
+                             box-shadow: 0 4px 20px rgba(255, 90, 95, 0.5);
+                         }
+                         @keyframes spin-refine {
+                             0% { transform: rotate(0deg); }
+                             100% { transform: rotate(360deg); }
+                         }
+                         .refine-text {
+                             font-family: 'Segoe UI', Roboto, sans-serif;
+                             font-size: 1.8rem;
+                             color: #FFFFFF;
+                             font-weight: 700;
+                             letter-spacing: -0.5px;
+                         }
+                         .refine-sub {
+                             font-family: 'Segoe UI', Roboto, sans-serif;
+                             color: #999999;
+                             margin-top: 12px;
+                             font-size: 1.0rem;
+                             letter-spacing: 0.3px;
+                         }
+                         </style>
+                         <div class="refine-overlay">
+                             <div class="refine-spinner"></div>
+                             <div class="refine-text">Refining Selection...</div>
+                             <div class="refine-sub">AI enhancing precision</div>
+                         </div>
+                     """, unsafe_allow_html=True)
+                     
+                     try:
                          new_mask = sam.generate_mask(
                              active_sel['points'],
                              active_sel['labels'],
                              level=st.session_state.get("mask_level", None),
                              use_texture_guard=st.session_state.get("use_texture_guard", True)
                          )
+                     finally:
+                         refine_placeholder.empty()
                      
                      if new_mask is not None:
                          active_sel['mask'] = new_mask
@@ -1522,9 +1576,62 @@ def main():
                      # --- START NEW SELECTION ---
                      # RESILIENCE: Self-healing check
                      if st.session_state.get("engine_img_id") != id(st.session_state["image"]) or not sam.is_image_set:
-                         with st.spinner("🔄 AI Re-syncing image..."):
+                         # Professional loading overlay for re-syncing
+                         resync_placeholder = st.empty()
+                         resync_placeholder.markdown("""
+                             <style>
+                             .resync-overlay {
+                                 position: fixed;
+                                 top: 0; left: 0; width: 100%; height: 100%;
+                                 background: rgba(14, 17, 23, 0.98);
+                                 backdrop-filter: blur(10px);
+                                 z-index: 9999999;
+                                 display: flex;
+                                 flex-direction: column;
+                                 justify-content: center;
+                                 align-items: center;
+                             }
+                             .resync-spinner {
+                                 width: 60px;
+                                 height: 60px;
+                                 border: 5px solid rgba(255, 255, 255, 0.1);
+                                 border-top: 5px solid #FF5A5F;
+                                 border-radius: 50%;
+                                 animation: spin 0.8s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
+                                 margin-bottom: 25px;
+                                 box-shadow: 0 4px 20px rgba(255, 90, 95, 0.5);
+                             }
+                             @keyframes spin {
+                                 0% { transform: rotate(0deg); }
+                                 100% { transform: rotate(360deg); }
+                             }
+                             .resync-text {
+                                 font-family: 'Segoe UI', Roboto, sans-serif;
+                                 font-size: 1.8rem;
+                                 color: #FFFFFF;
+                                 font-weight: 700;
+                                 letter-spacing: -0.5px;
+                             }
+                             .resync-sub {
+                                 font-family: 'Segoe UI', Roboto, sans-serif;
+                                 color: #999999;
+                                 margin-top: 12px;
+                                 font-size: 1.0rem;
+                                 letter-spacing: 0.3px;
+                             }
+                             </style>
+                             <div class="resync-overlay">
+                                 <div class="resync-spinner"></div>
+                                 <div class="resync-text">Syncing AI Engine...</div>
+                                 <div class="resync-sub">Preparing for precision detection</div>
+                             </div>
+                         """, unsafe_allow_html=True)
+                         
+                         try:
                              sam.set_image(st.session_state["image"])
                              st.session_state["engine_img_id"] = id(st.session_state["image"])
+                         finally:
+                             resync_placeholder.empty()
 
                      mask = sam.generate_mask(
                         [click_tuple],

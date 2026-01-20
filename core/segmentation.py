@@ -98,11 +98,11 @@ class SegmentationEngine:
         if cleanup:
             # --- HOLE FILLING FIRST (NEW) ---
             # Fill small holes caused by lighting variations BEFORE applying fences
-            # This ensures spotlights and shadows don't create gaps
-            kernel_fill = np.ones((7, 7), np.uint8)
+            # Increased kernel size for better coverage of shadow gaps
+            kernel_fill = np.ones((9, 9), np.uint8)
             mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel_fill)
             
-            # --- COLOR-BASED WALL SEPARATION (Relaxed for Lighting) ---
+            # --- COLOR-BASED WALL SEPARATION (Stricter for Precision) ---
             # This prevents selecting the entire building when clicking one wall
             if use_texture_guard and self.image_rgb is not None and len(point_coords) > 0:
                 # Get the clicked point's color
@@ -111,48 +111,51 @@ class SegmentationEngine:
                 cx, cy = max(0, min(cx, w - 1)), max(0, min(cy, h - 1))
                 
                 # Sample a small region around the click for color reference
-                sample_size = 20  # Larger sample to average out lighting
+                sample_size = 15  # Reduced sample size for more local precision
                 y1, y2 = max(0, cy - sample_size), min(h, cy + sample_size)
                 x1, x2 = max(0, cx - sample_size), min(w, cx + sample_size)
                 clicked_color = np.median(self.image_rgb[y1:y2, x1:x2], axis=(0, 1))
                 
-                # Calculate color distance map (how different each pixel is from clicked color)
+                # Calculate color distance map
                 color_diff = np.sqrt(np.sum((self.image_rgb.astype(float) - clicked_color) ** 2, axis=2))
                 
                 # Create color fence: areas that are too different in color
-                # Very lenient to handle extreme lighting (spotlights, shadows)
-                if level == 2:  # Walls/Ceilings - very lenient for lighting
-                    color_threshold = 95  # High threshold to handle spotlights and dramatic lighting
+                # RELAXED THRESHOLDS to reduce holes while keeping basic separation
+                if level == 2:  # Walls/Ceilings
+                    color_threshold = 60  # Slightly higher to tolerate shadows
                 else:
-                    color_threshold = 90  # Also lenient for details
+                    color_threshold = 60  # Increased from 40 for better shadow tolerance
                     
                 color_fence = (color_diff > color_threshold).astype(np.uint8) * 255
                 
-                # Minimal dilation - just enough to separate truly different surfaces
-                color_fence = cv2.dilate(color_fence, np.ones((3, 3), np.uint8), iterations=1)
+                # Dilation to close small gaps in the fence
+                color_fence = cv2.dilate(color_fence, np.ones((3, 3), np.uint8), iterations=2)
                 
-                # Apply color fence: remove mask where color is too different
+                # Apply color fence
                 mask_uint8[color_fence > 0] = 0
+
+                # Additional closing to seal any remaining small gaps after fence removal
+                mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
             
-            # --- SURGICAL BOUNDARY PROTECTION (Minimal) ---
+            # --- SURGICAL BOUNDARY PROTECTION ---
             if use_texture_guard and self.image_rgb is not None:
                 gray = cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY)
-                # Balanced edge detection - catch boundaries without cutting into surfaces
-                edges = cv2.Canny(gray, 25, 100)  # Moderate thresholds
-                fence = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)  # Moderate dilation
+                # Stronger edge detection to find wall corners/edges
+                # Low threshold 30 (was 20) ignores more texture noise
+                edges = cv2.Canny(gray, 30, 80)  
+                fence = cv2.dilate(edges, np.ones((2, 2), np.uint8), iterations=1)
                 
-                # Apply strictly: If an edge is detected, it's a hard stop
+                # Apply strictly
                 mask_uint8[fence > 0] = 0
 
             # Basic Morphological Cleanup
             if level == 2: # Walls/Large Surfaces
                 # 1. Open/Close to remove noise
-                kernel_clean = np.ones((5, 5), np.uint8)
+                # Reduced to 3x3 to preserve sharp corners and edges
+                kernel_clean = np.ones((3, 3), np.uint8)
                 mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel_clean)
                 
-                # 2. Light erosion to pull back from edges slightly
-                kernel_erode = np.ones((3, 3), np.uint8)
-                mask_uint8 = cv2.erode(mask_uint8, kernel_erode, iterations=1)  # Back to 1 for better coverage
+                # 2. REDUNDANT EROSION REMOVED (It was causing double shrinkage)
                 
                 mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel_clean)
             else:
